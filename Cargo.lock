@@ -4672,10 +4672,12 @@ dependencies = [
  "reth-arbitrum-payload",
  "reth-arbitrum-primitives",
  "reth-arbitrum-rpc",
+ "reth-ethereum-engine-primitives",
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-tasks",
  "serde",
  "serde_json",
@@ -5893,6 +5895,8 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-execution-errors",
  "reth-execution-types",
+ "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-rpc-eth-api",
@@ -5953,10 +5957,17 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "reth-arbitrum-primitives",
+ "reth-basic-payload-builder",
  "reth-chain-state",
+ "reth-chainspec",
+ "reth-evm",
+ "reth-execution-types",
  "reth-payload-builder",
  "reth-payload-primitives",
+ "reth-payload-util",
  "reth-primitives-traits",
+ "reth-revm",
+ "reth-storage-api",
  "serde",
 ]
 
@@ -7439,6 +7450,15 @@ dependencies = [
  "serde",
  "thiserror 2.0.14",
  "tokio",
+]
+
+[[package]]
+name = "reth-payload-util"
+version = "1.6.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "reth-transaction-pool",
 ]
 
 [[package]]
