@@ -27,11 +27,11 @@ impl NitroNode {
     }
 
 
-    async fn start_feed_server(&self, _tracker: Arc<nitro_inbox::tracker::InboxTracker<nitro_db_sled::SledDb>>) -> Result<()> {
-        if !self.args.feed_enable {
+    async fn start_feed_server(&self, enable: bool, port: u16, _tracker: Arc<nitro_inbox::tracker::InboxTracker<nitro_db_sled::SledDb>>) -> Result<()> {
+        if !enable {
             return Ok(());
         }
-        let addr: SocketAddr = format!("0.0.0.0:{}", self.args.feed_port).parse().unwrap();
+        let addr: SocketAddr = format!("0.0.0.0:{}", port).parse().unwrap();
         let listener = tokio::net::TcpListener::bind(addr).await?;
         tokio::spawn(async move {
             loop {
@@ -87,6 +87,8 @@ impl NitroNode {
         let mut poster_enable_cfg = self.args.poster_enable;
         let mut parent_chain_bound_cfg: Option<String> = None;
         let mut poster_privkey_cfg: Option<String> = std::env::var("NITRO_L1_POSTER_KEY").ok();
+        let mut feed_enable_cfg = self.args.feed_enable;
+        let mut feed_port_cfg = self.args.feed_port;
 
         if let Some(conf_path) = self.args.conf_file.clone() {
             if let Ok(text) = std::fs::read_to_string(&conf_path) {
@@ -102,6 +104,12 @@ impl NitroNode {
                     }
                     if let Some(k) = v.pointer("/node/batch-poster/parent-chain-wallet/private-key").and_then(|x| x.as_str()) {
                         poster_privkey_cfg = Some(k.to_string());
+                    }
+                    if let Some(b) = v.pointer("/node/feed/output/enable").and_then(|x| x.as_bool()) {
+                        feed_enable_cfg = b;
+                    }
+                    if let Some(p) = v.pointer("/node/feed/output/port").and_then(|x| x.as_u64()) {
+                        feed_port_cfg = p as u16;
                     }
                     let info_files = v.pointer("/chain/info-files").and_then(|x| x.as_array()).cloned().unwrap_or_default();
                     if let Some(info_path_val) = info_files.get(0).and_then(|x| x.as_str()) {
@@ -188,8 +196,10 @@ impl NitroNode {
         let feed_task = tokio::spawn({
             let this = self.clone_args();
             let tracker = tracker.clone();
+            let enable = feed_enable_cfg;
+            let port = feed_port_cfg;
             async move {
-                let _ = this.start_feed_server(tracker).await;
+                let _ = this.start_feed_server(enable, port, tracker).await;
             }
         });
 
