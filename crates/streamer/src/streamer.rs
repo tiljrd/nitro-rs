@@ -26,7 +26,20 @@ impl<D: Database> TransactionStreamer<D> {
 
     pub async fn start(&self) -> Result<()> {
         info!("starting transaction streamer");
-        Ok(())
+        let mut delay = tokio::time::interval(std::time::Duration::from_millis(200));
+        delay.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            match self.execute_next_msg().await {
+                Ok(true) => {}
+                Ok(false) => {
+                    delay.tick().await;
+                }
+                Err(e) => {
+                    tracing::error!("streamer execute_next_msg error: {e:?}");
+                    delay.tick().await;
+                }
+            }
+        }
     }
 
     fn set_message_count(&self, batch: &mut dyn Batch, count: u64) -> Result<()> {
