@@ -7,8 +7,9 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 anyhow = { workspace = true }
 tracing = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-arb-alloy-consensus = { workspace = true }
-arb-alloy-predeploys = { workspace = true }
-arb-alloy-util = { workspace = true }
 alloy-primitives = { workspace = true }
+alloy-rlp = { workspace = true }
+arb-alloy-util = { workspace = true }
+lru = { workspace = true }
+
+nitro-primitives = { path = "../primitives" }

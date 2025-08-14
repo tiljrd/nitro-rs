@@ -1,21 +1,115 @@
+use crate::db::{Batch as DbBatch, Database};
 use alloy_primitives::B256;
+use arb_alloy_util as arb_util;
+use reth_arbitrum_primitives as _;
+use nitro_primitives::dbkeys::*;
+use std::sync::{Arc, Mutex};
 
-#[derive(Debug, Clone, Default)]
-pub struct InboxTracker {
-    last_batch_count: u64,
-    last_delayed_count: u64,
+#[derive(Clone)]
+pub struct SnapSyncConfig {
+    pub enabled: bool,
+    pub delayed_count: u64,
 }
 
-impl InboxTracker {
-    pub fn new() -> Self {
-        Self::default()
+#[derive(Clone)]
+pub struct BatchMetadata {
+    pub accumulator: B256,
+    pub message_count: u64,
+    pub delayed_message_count: u64,
+    pub parent_chain_block: u64,
+}
+
+pub struct InboxTracker<D: Database> {
+    pub db: Arc<D>,
+    pub batch_meta_cache: Mutex<lru::LruCache<u64, BatchMetadata>>,
+}
+
+impl<D: Database> InboxTracker<D> {
+    pub fn new(db: Arc<D>) -> Self {
+        Self {
+            db,
+            batch_meta_cache: Mutex::new(lru::LruCache::new(std::num::NonZeroUsize::new(1000).unwrap())),
+        }
     }
 
-    pub fn get_batch_count(&self) -> u64 { self.last_batch_count }
-    pub fn get_delayed_count(&self) -> u64 { self.last_delayed_count }
+    pub fn initialize(&self) -> anyhow::Result<()> {
+        let mut batch = self.db.new_batch();
+        if !self.db.has(DELAYED_MESSAGE_COUNT_KEY)? {
+            let value = alloy_rlp::encode(&0u64);
+            batch.put(DELAYED_MESSAGE_COUNT_KEY, &value)?;
+        }
+        if !self.db.has(SEQUENCER_BATCH_COUNT_KEY)? {
+            let value = alloy_rlp::encode(&0u64);
+            batch.put(SEQUENCER_BATCH_COUNT_KEY, &value)?;
+        }
+        batch.write()?;
+        Ok(())
+    }
 
-    pub fn set_batch_accumulator(&mut self, _seqnum: u64, _acc: B256) {}
-    pub fn set_delayed_accumulator(&mut self, _seqnum: u64, _acc: B256) {}
+    pub fn get_delayed_acc(&self, seqnum: u64) -> anyhow::Result<B256> {
+        let mut key = db_key(RLP_DELAYED_MESSAGE_PREFIX, seqnum);
+        if !self.db.has(&key)? {
+            key = db_key(LEGACY_DELAYED_MESSAGE_PREFIX, seqnum);
+            if !self.db.has(&key)? {
+                anyhow::bail!("accumulator not found: delayed {}", seqnum);
+            }
+        }
+        let data = self.db.get(&key)?;
+        if data.len() < 32 {
+            anyhow::bail!("delayed message entry missing accumulator");
+        }
+        Ok(B256::from_slice(&data[..32]))
+    }
 
-    pub fn reorg_delayed_to(&mut self, count: u64) { self.last_delayed_count = count; }
+    pub fn get_delayed_count(&self) -> anyhow::Result<u64> {
+        let data = self.db.get(DELAYED_MESSAGE_COUNT_KEY)?;
+        let mut dec = alloy_rlp::Decoder::new(&data);
+        Ok(u64::decode(&mut dec)?)
+    }
+
+    pub fn get_batch_metadata(&self, seqnum: u64) -> anyhow::Result<BatchMetadata> {
+        if let Some(m) = self.batch_meta_cache.lock().unwrap().get(&seqnum).cloned() {
+            return Ok(m);
+        }
+        let key = db_key(SEQUENCER_BATCH_META_PREFIX, seqnum);
+        if !self.db.has(&key)? {
+            anyhow::bail!("accumulator not found: no metadata for batch {}", seqnum);
+        }
+        let data = self.db.get(&key)?;
+        let mut dec = alloy_rlp::Decoder::new(&data);
+        let acc: B256 = B256::decode(&mut dec)?;
+        let msg_count: u64 = u64::decode(&mut dec)?;
+        let delayed_count: u64 = u64::decode(&mut dec)?;
+        let parent_block: u64 = u64::decode(&mut dec)?;
+        let meta = BatchMetadata {
+            accumulator: acc,
+            message_count: msg_count,
+            delayed_message_count: delayed_count,
+            parent_chain_block: parent_block,
+        };
+        self.batch_meta_cache.lock().unwrap().push(seqnum, meta.clone());
+        Ok(meta)
+    }
+
+    pub fn get_batch_message_count(&self, seqnum: u64) -> anyhow::Result<u64> {
+        Ok(self.get_batch_metadata(seqnum)?.message_count)
+    }
+
+    pub fn get_batch_parent_chain_block(&self, seqnum: u64) -> anyhow::Result<u64> {
+        Ok(self.get_batch_metadata(seqnum)?.parent_chain_block)
+    }
+
+    pub fn get_batch_acc(&self, seqnum: u64) -> anyhow::Result<B256> {
+        Ok(self.get_batch_metadata(seqnum)?.accumulator)
+    }
+
+    pub fn get_batch_count(&self) -> anyhow::Result<u64> {
+        let data = self.db.get(SEQUENCER_BATCH_COUNT_KEY)?;
+        let mut dec = alloy_rlp::Decoder::new(&data);
+        Ok(u64::decode(&mut dec)?)
+    }
 }
+
+trait RlpDecodeExt: alloy_rlp::Decodable {}
+impl RlpDecodeExt for u64 {}
+impl RlpDecodeExt for B256 {}
