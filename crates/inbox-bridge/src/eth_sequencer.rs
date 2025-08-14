@@ -1,20 +1,33 @@
+use crate::rpc::RpcClient;
 use crate::traits::SequencerInbox;
 use crate::types::SequencerInboxBatch;
 use alloy_primitives::{keccak256, Address, B256, U256};
-use alloy_provider::{Provider, ProviderBuilder};
-use alloy_rpc_types::{BlockNumberOrTag, Filter};
 use async_trait::async_trait;
+use serde::Deserialize;
+use serde_json::json;
+use std::str::FromStr;
 use std::sync::Arc;
 
+#[derive(Deserialize)]
+struct RpcLog {
+    address: String,
+    data: String,
+    topics: Vec<String>,
+    #[serde(default)]
+    blockNumber: Option<String>,
+    #[serde(default)]
+    blockHash: Option<String>,
+}
+
 pub struct EthSequencerInbox {
-    provider: Arc<dyn Provider>,
+    rpc: Arc<RpcClient>,
     inbox_addr: Address,
 }
 
 impl EthSequencerInbox {
     pub async fn new_http(rpc_url: &str, inbox_addr: Address) -> anyhow::Result<Self> {
-        let provider = Arc::new(ProviderBuilder::default().connect(rpc_url).await?);
-        Ok(Self { provider, inbox_addr })
+        let rpc = Arc::new(RpcClient::new(rpc_url.to_string()));
+        Ok(Self { rpc, inbox_addr })
     }
 
     fn encode_selector(sig: &str) -> [u8; 4] {
@@ -46,11 +59,13 @@ impl SequencerInbox for EthSequencerInbox {
     async fn get_batch_count(&self, block_number: u64) -> anyhow::Result<u64> {
         let mut data = Vec::with_capacity(4);
         data.extend_from_slice(&Self::encode_selector("batchCount()"));
-        let to = self.inbox_addr;
-        let res = self
-            .provider
-            .call_raw(to, data.into(), Some(BlockNumberOrTag::Number(block_number.into())))
-            .await?;
+        let to_hex = format!("{:#x}", self.inbox_addr);
+        let block_tag = format!("0x{:x}", block_number);
+        let res_hex: String = self.rpc.call("eth_call", json!([{
+            "to": to_hex,
+            "data": format!("0x{}", hex::encode(data)),
+        }, block_tag])).await?;
+        let res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             anyhow::bail!("short returndata for batchCount")
         }
@@ -62,11 +77,13 @@ impl SequencerInbox for EthSequencerInbox {
         let mut data = Vec::with_capacity(4 + 32);
         data.extend_from_slice(&Self::encode_selector("inboxAccs(uint256)"));
         data.extend_from_slice(&Self::encode_u256(U256::from(seq_num)));
-        let to = self.inbox_addr;
-        let res = self
-            .provider
-            .call_raw(to, data.into(), Some(BlockNumberOrTag::Number(block_number.into())))
-            .await?;
+        let to_hex = format!("{:#x}", self.inbox_addr);
+        let block_tag = format!("0x{:x}", block_number);
+        let res_hex: String = self.rpc.call("eth_call", json!([{
+            "to": to_hex,
+            "data": format!("0x{}", hex::encode(data)),
+        }, block_tag])).await?;
+        let res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             anyhow::bail!("short returndata for inboxAccs")
         }
@@ -78,21 +95,21 @@ impl SequencerInbox for EthSequencerInbox {
             "SequencerBatchDelivered(uint256,bytes32,bytes32,bytes32,uint256,(uint64,uint64,uint64,uint64),uint8,uint8,uint8)"
                 .as_bytes(),
         ));
-        let filter = Filter {
-            from_block: Some(from_block.into()),
-            to_block: Some(to_block.into()),
-            address: Some(vec![self.inbox_addr]),
-            topics: Some(vec![vec![topic0]]),
-            block_hash: None,
-        };
-        let logs = self.provider.get_logs(&filter).await?;
+        let filter = json!({
+            "fromBlock": format!("0x{:x}", from_block),
+            "toBlock": format!("0x{:x}", to_block),
+            "address": format!("{:#x}", self.inbox_addr),
+            "topics": [[format!("{:#x}", topic0)]],
+        });
+        let logs: Vec<RpcLog> = self.rpc.call("eth_getLogs", json!([filter])).await?;
         let mut out = Vec::with_capacity(logs.len());
         let mut last_seq: Option<u64> = None;
         for lg in logs {
-            if lg.topics.len() < 2 || lg.data.len() < 32 * 4 {
+            let data_bytes = hex::decode(lg.data.trim_start_matches("0x"))?;
+            if lg.topics.len() < 2 || data_bytes.len() < 32 * 4 {
                 continue;
             }
-            let seq = U256::from_be_bytes(lg.topics[1].0).to::<u64>();
+            let seq = U256::from_be_bytes(B256::from_str(&lg.topics[1]).unwrap_or_default().0).to::<u64>();
             if let Some(prev) = last_seq {
                 if seq != prev + 1 {
                     anyhow::bail!("batches out of order: after {} got {}", prev, seq)
@@ -100,15 +117,15 @@ impl SequencerInbox for EthSequencerInbox {
             }
             last_seq = Some(seq);
 
-            let before_acc = Self::decode_b256_word(&lg.data[0..32])?;
-            let after_acc = Self::decode_b256_word(&lg.data[32..64])?;
-            let delayed_acc = Self::decode_b256_word(&lg.data[64..96])?;
-            let after_delayed_count = Self::decode_u256_word(&lg.data[96..128])?.to::<u64>();
+            let before_acc = Self::decode_b256_word(&data_bytes[0..32])?;
+            let after_acc = Self::decode_b256_word(&data_bytes[32..64])?;
+            let delayed_acc = Self::decode_b256_word(&data_bytes[64..96])?;
+            let after_delayed_count = Self::decode_u256_word(&data_bytes[96..128])?.to::<u64>();
 
-            let min_ts = Self::decode_u256_word(&lg.data[128..160])?.to::<u64>();
-            let max_ts = Self::decode_u256_word(&lg.data[160..192])?.to::<u64>();
-            let min_bn = Self::decode_u256_word(&lg.data[192..224])?.to::<u64>();
-            let max_bn = Self::decode_u256_word(&lg.data[224..256])?.to::<u64>();
+            let min_ts = Self::decode_u256_word(&data_bytes[128..160])?.to::<u64>();
+            let max_ts = Self::decode_u256_word(&data_bytes[160..192])?.to::<u64>();
+            let min_bn = Self::decode_u256_word(&data_bytes[192..224])?.to::<u64>();
+            let max_bn = Self::decode_u256_word(&data_bytes[224..256])?.to::<u64>();
             let time_bounds = crate::types::TimeBounds {
                 min_timestamp: min_ts,
                 max_timestamp: max_ts,
@@ -116,7 +133,7 @@ impl SequencerInbox for EthSequencerInbox {
                 max_block_number: max_bn,
             };
 
-            let data_loc_u256 = Self::decode_u256_word(&lg.data[256..288])?;
+            let data_loc_u256 = Self::decode_u256_word(&data_bytes[256..288])?;
             let data_location: u8 = (data_loc_u256 & U256::from(0xff)).to::<u8>();
 
             let batch = SequencerInboxBatch {
@@ -128,9 +145,9 @@ impl SequencerInbox for EthSequencerInbox {
                 after_delayed_acc: delayed_acc,
                 time_bounds,
                 data_location,
-                bridge_address: lg.address.unwrap_or_default(),
-                parent_chain_block_number: lg.block_number.unwrap_or_default(),
-                block_hash: lg.block_hash.unwrap_or_default(),
+                bridge_address: Address::from_str(&lg.address).unwrap_or_default(),
+                parent_chain_block_number: lg.blockNumber.as_deref().and_then(|h| u64::from_str_radix(h.trim_start_matches("0x"), 16).ok()).unwrap_or_default(),
+                block_hash: lg.blockHash.as_deref().and_then(|h| B256::from_str(h).ok()).unwrap_or_default(),
                 serialized: Vec::new(),
             };
             out.push(batch);
@@ -147,19 +164,19 @@ impl SequencerInbox for EthSequencerInbox {
         let mut topic1_bytes = [0u8; 32];
         topic1_bytes[24..32].copy_from_slice(&seq_num.to_be_bytes());
         let topic1 = B256::from_slice(&topic1_bytes);
-        let filter = Filter {
-            from_block: Some(block_number.into()),
-            to_block: Some(block_number.into()),
-            address: Some(vec![self.inbox_addr]),
-            topics: Some(vec![vec![topic0], vec![topic1]]),
-            block_hash: None,
-        };
-        let logs = self.provider.get_logs(&filter).await?;
+        let filter = json!({
+            "fromBlock": format!("0x{:x}", block_number),
+            "toBlock": format!("0x{:x}", block_number),
+            "address": format!("{:#x}", self.inbox_addr),
+            "topics": [[format!("{:#x}", topic0)], [format!("{:#x}", topic1)]],
+        });
+        let logs: Vec<RpcLog> = self.rpc.call("eth_getLogs", json!([filter])).await?;
         if logs.len() != 1 {
             anyhow::bail!("expected exactly 1 SequencerBatchData log for seq {} at block {}", seq_num, block_number);
         }
         let lg = &logs[0];
-        let data = &lg.data;
+        let data_hex = &lg.data;
+        let data = hex::decode(data_hex.trim_start_matches("0x"))?;
         if data.len() < 64 {
             anyhow::bail!("invalid SequencerBatchData encoding");
         }
