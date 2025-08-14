@@ -15,3 +15,7 @@ brotli = "3"
 
 nitro-primitives = { path = "../primitives" }
 inbox-bridge = { path = "../inbox-bridge" }
+
+[dev-dependencies]
+tempfile = "3"
+nitro-db-sled = { path = "../db-sled" }

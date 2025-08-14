@@ -50,7 +50,7 @@ pub fn parse_sequencer_message(batch_num: u64, _batch_block_hash: Option<B256>, 
     let mut segments: Vec<Vec<u8>> = Vec::new();
     if !payload.is_empty() {
         let first = payload[0];
-        if first == 0x01 { // heuristic: brotli flag per Nitro, value checked via daprovider
+        if first == 0x01 {
             let mut decompressed = Vec::new();
             let mut reader = brotli::Decompressor::new(&payload[1..], 4096);
             reader.read_to_end(&mut decompressed)?;
@@ -65,6 +65,16 @@ pub fn parse_sequencer_message(batch_num: u64, _batch_block_hash: Option<B256>, 
                 }
             }
         } else {
+            let mut cur = payload;
+            while !cur.is_empty() {
+                match <Vec<u8> as Decodable>::decode(&mut cur) {
+                    Ok(seg) => {
+                        segments.push(seg);
+                        if segments.len() > 100 * 1024 { break; }
+                    }
+                    Err(_) => break,
+                }
+            }
         }
     }
 
@@ -143,11 +153,17 @@ impl<B: InboxBackend> InboxMultiplexer<B> {
 
     pub fn pop(&mut self) -> anyhow::Result<Option<MessageWithMetadataAndBlockInfo>> {
         if self.cached_msg.is_none() {
-            let (bytes, batch_hash) = self.backend.peek_sequencer_inbox()?;
-            let seqnum = self.backend.get_sequencer_inbox_position();
-            let parsed = parse_sequencer_message(seqnum, batch_hash, &bytes)?;
-            self.cached_batch_hash = batch_hash;
-            self.cached_msg = Some(parsed);
+            match self.backend.peek_sequencer_inbox() {
+                Ok((bytes, batch_hash)) => {
+                    let seqnum = self.backend.get_sequencer_inbox_position();
+                    let parsed = parse_sequencer_message(seqnum, batch_hash, &bytes)?;
+                    self.cached_batch_hash = batch_hash;
+                    self.cached_msg = Some(parsed);
+                }
+                Err(_) => {
+                    return Ok(None);
+                }
+            }
         }
         let (msg, err) = self.get_next_msg();
         if self.is_cached_segment_last() {

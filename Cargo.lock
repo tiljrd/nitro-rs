@@ -4603,9 +4603,19 @@ name = "nitro-batch-poster"
 version = "0.1.1"
 dependencies = [
  "alloy-primitives",
+ "alloy-provider",
+ "alloy-rlp",
+ "alloy-rpc-types",
+ "alloy-signer",
+ "alloy-signer-local",
+ "alloy-sol-types",
+ "alloy-transport-http",
  "anyhow",
  "arb-alloy-util 0.1.1",
+ "async-trait",
+ "brotli 3.5.0",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]
@@ -4630,7 +4640,9 @@ dependencies = [
  "brotli 3.5.0",
  "inbox-bridge",
  "lru 0.12.5",
+ "nitro-db-sled",
  "nitro-primitives",
+ "tempfile",
  "tracing",
 ]
 
@@ -4639,11 +4651,14 @@ name = "nitro-inbox-reader"
 version = "0.1.1"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "anyhow",
  "async-trait",
  "inbox-bridge",
+ "nitro-db-sled",
  "nitro-inbox",
  "nitro-primitives",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -4700,9 +4715,16 @@ dependencies = [
 name = "nitro-rpc"
 version = "0.1.1"
 dependencies = [
+ "alloy-primitives",
  "anyhow",
+ "async-trait",
+ "hex",
+ "nitro-inbox",
+ "nitro-primitives",
+ "nitro-streamer",
  "reth-arbitrum-rpc",
  "serde",
+ "serde_json",
  "tracing",
 ]
 
@@ -4714,9 +4736,11 @@ dependencies = [
  "alloy-rlp",
  "anyhow",
  "async-trait",
+ "nitro-db-sled",
  "nitro-inbox",
  "nitro-primitives",
  "serde",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -4726,7 +4750,9 @@ name = "nitro-validator"
 version = "0.1.1"
 dependencies = [
  "anyhow",
+ "async-trait",
  "serde",
+ "tokio",
  "tracing",
 ]
 
@@ -6003,6 +6029,7 @@ dependencies = [
  "jsonrpsee",
  "jsonrpsee-core",
  "jsonrpsee-types",
+ "once_cell",
  "reth-arbitrum-evm",
  "reth-arbitrum-payload",
  "reth-arbitrum-primitives",

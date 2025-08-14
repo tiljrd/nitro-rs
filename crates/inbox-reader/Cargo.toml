@@ -14,3 +14,10 @@ alloy-primitives = { workspace = true }
 nitro-primitives = { path = "../primitives", version = "0.1.1" }
 nitro-inbox = { path = "../inbox", version = "0.1.1" }
 inbox-bridge = { path = "../inbox-bridge", version = "0.1.1" }
+
+[dev-dependencies]
+tempfile = "3"
+nitro-db-sled = { path = "../db-sled" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+async-trait = "0.1"
+alloy-rlp = { workspace = true }

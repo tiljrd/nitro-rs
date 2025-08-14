@@ -56,18 +56,28 @@ impl<D: Database> InboxTracker<D> {
     }
 
     pub fn get_delayed_acc(&self, seqnum: u64) -> anyhow::Result<B256> {
-        let mut key = db_key(RLP_DELAYED_MESSAGE_PREFIX, seqnum);
-        if !self.db.has(&key)? {
-            key = db_key(LEGACY_DELAYED_MESSAGE_PREFIX, seqnum);
-            if !self.db.has(&key)? {
-                anyhow::bail!("accumulator not found: delayed {}", seqnum);
+        let rlp_key = db_key(RLP_DELAYED_MESSAGE_PREFIX, seqnum);
+        if self.db.has(&rlp_key)? {
+            let data = self.db.get(&rlp_key)?;
+            if data.len() < 32 {
+                anyhow::bail!("delayed message entry missing accumulator");
             }
+            let prev = B256::from_slice(&data[..32]);
+            let msg_bytes = &data[32..];
+            return Ok(hash_after(prev, msg_bytes));
         }
-        let data = self.db.get(&key)?;
-        if data.len() < 32 {
-            anyhow::bail!("delayed message entry missing accumulator");
+        let legacy_key = db_key(LEGACY_DELAYED_MESSAGE_PREFIX, seqnum);
+        if self.db.has(&legacy_key)? {
+            let data = self.db.get(&legacy_key)?;
+            if data.len() < 32 {
+                anyhow::bail!("delayed message legacy entry missing accumulator");
+            }
+            let prev = B256::from_slice(&data[..32]);
+            let msg = parse_incoming_l1_message_legacy(&data[32..])?;
+            let ser = serialize_incoming_l1_message_legacy(&msg)?;
+            return Ok(hash_after(prev, &ser));
         }
-        Ok(B256::from_slice(&data[..32]))
+        anyhow::bail!("accumulator not found: delayed {}", seqnum)
     }
 
     pub fn get_delayed_count(&self) -> anyhow::Result<u64> {
@@ -434,8 +444,7 @@ impl<D: Database> InboxTracker<D> {
                 anyhow::bail!("delayed message new entry missing accumulator");
             }
             let acc = B256::from_slice(&data[..32]);
-            let mut bytes = &data[32..];
-            let msg: L1IncomingMessage = L1IncomingMessage::decode(&mut bytes)?;
+            let msg = parse_incoming_l1_message_legacy(&data[32..])?;
             let pkey = db_key(PARENT_CHAIN_BLOCK_NUMBER_PREFIX, seqnum);
             let parent_block = if self.db.has(&pkey)? {
                 let v = self.db.get(&pkey)?;

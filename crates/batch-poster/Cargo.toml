@@ -9,5 +9,18 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 arb-alloy-util = { workspace = true }
 alloy-primitives = { workspace = true }
+alloy-rlp = { workspace = true }
+
+async-trait = { workspace = true }
+# L1 posting
+alloy-provider = "1"
+alloy-transport-http = "1"
+alloy-signer = "1"
+alloy-signer-local = "1"
+alloy-sol-types = { workspace = true }
+alloy-rpc-types = "1"
+# compression
+brotli = "3"
