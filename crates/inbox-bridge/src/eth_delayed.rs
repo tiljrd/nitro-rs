@@ -108,7 +108,7 @@ impl DelayedBridge for EthDelayedBridge {
         F: Fn(u64) -> anyhow::Result<Vec<u8>> + Send + Sync,
     {
         let message_delivered_topic: B256 =
-            keccak256("MessageDelivered(address,address,uint8,uint256,bytes32,bytes32,uint64,bytes32,uint64)".as_bytes());
+            keccak256("MessageDelivered(uint256,bytes32,address,uint8,address,bytes32,uint256,uint64)".as_bytes());
         let filter = json!({
             "fromBlock": format!("0x{:x}", from_block),
             "toBlock": format!("0x{:x}", to_block),
@@ -123,23 +123,18 @@ impl DelayedBridge for EthDelayedBridge {
 
         for lg in logs {
             let data_bytes = hex::decode(lg.data.trim_start_matches("0x"))?;
-            if data_bytes.len() < 32 * 7 {
+            if lg.topics.len() < 2 || data_bytes.len() < 32 * 5 {
                 continue;
             }
-            let before_acc = B256::from_slice(&data_bytes[0..32]);
-            let kind = u8::try_from(Self::decode_u256_word(&data_bytes[32..64])?.to::<u64>()).unwrap_or(0);
-            let timestamp = Self::decode_u256_word(&data_bytes[64..96])?.to::<u64>();
-            let sender = Address::from_slice(&data_bytes[96 + 12..96 + 32]);
-            let request_id = B256::from_slice(&data_bytes[128..160]);
-            let basefee = Self::decode_u256_word(&data_bytes[160..192])?;
+            let message_index = U256::from_be_bytes(B256::from_str(&lg.topics[1]).unwrap_or_default().0).to::<u64>();
+            let before_acc = B256::from_str(&lg.topics[2]).unwrap_or_default();
 
-            let inbox_addr = if lg.topics.len() > 1 {
-                let t1 = &lg.topics[1];
-                let t1_bytes = hex::decode(t1.trim_start_matches("0x"))?;
-                Address::from_slice(&t1_bytes[12..32])
-            } else {
-                Address::ZERO
-            };
+            let inbox_addr = Address::from_slice(&data_bytes[12..32]);
+            let kind = u8::try_from(Self::decode_u256_word(&data_bytes[32..64])?.to::<u64>()).unwrap_or(0);
+            let sender = Address::from_slice(&data_bytes[64 + 12..64 + 32]);
+            let message_data_hash = B256::from_slice(&data_bytes[96..128]);
+            let basefee = Self::decode_u256_word(&data_bytes[128..160])?;
+            let timestamp = Self::decode_u256_word(&data_bytes[160..192])?.to::<u64>();
 
             let block_number = lg.blockNumber.as_deref().and_then(|h| u64::from_str_radix(h.trim_start_matches("0x"), 16).ok()).unwrap_or_default();
             let block_hash = lg.blockHash.as_deref().and_then(|h| B256::from_str(h).ok()).unwrap_or_default();
@@ -149,20 +144,20 @@ impl DelayedBridge for EthDelayedBridge {
                 poster: sender,
                 block_number,
                 timestamp,
-                request_id: Some(request_id),
+                request_id: Some(message_data_hash),
                 l1_base_fee: basefee,
             };
             let msg = nitro_primitives::l1::L1IncomingMessage { header, l2msg: Vec::new(), batch_gas_cost: None };
             let dim = DelayedInboxMessage {
-                seq_num: U256::from_be_bytes(request_id.0).to::<u64>(),
+                seq_num: message_index,
                 block_hash,
                 before_inbox_acc: before_acc,
                 message: msg,
                 parent_chain_block_number: block_number,
             };
             inbox_addresses.insert(inbox_addr);
-            message_ids.push(request_id);
-            parsed.push((dim, inbox_addr, request_id));
+            message_ids.push(message_data_hash);
+            parsed.push((dim, inbox_addr, message_data_hash));
         }
 
         if parsed.is_empty() {

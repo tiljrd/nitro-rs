@@ -92,7 +92,7 @@ impl SequencerInbox for EthSequencerInbox {
 
     async fn lookup_batches_in_range(&self, from_block: u64, to_block: u64) -> anyhow::Result<Vec<SequencerInboxBatch>> {
         let topic0: B256 = keccak256(
-            "SequencerBatchDelivered(uint256,bytes32,bytes32,bytes32,uint256,(uint64,uint64,uint64,uint64),uint8,uint8,uint8)"
+            "SequencerBatchDelivered(uint256,bytes32,bytes32,bytes32,uint256,(uint64,uint64,uint64,uint64),uint8)"
                 .as_bytes(),
         );
         let filter = json!({
@@ -106,7 +106,7 @@ impl SequencerInbox for EthSequencerInbox {
         let mut last_seq: Option<u64> = None;
         for lg in logs {
             let data_bytes = hex::decode(lg.data.trim_start_matches("0x"))?;
-            if lg.topics.len() < 2 || data_bytes.len() < 32 * 4 {
+            if lg.topics.len() < 4 || data_bytes.len() < 32 * 7 {
                 continue;
             }
             let seq = U256::from_be_bytes(B256::from_str(&lg.topics[1]).unwrap_or_default().0).to::<u64>();
@@ -117,15 +117,15 @@ impl SequencerInbox for EthSequencerInbox {
             }
             last_seq = Some(seq);
 
-            let before_acc = Self::decode_b256_word(&data_bytes[0..32])?;
-            let after_acc = Self::decode_b256_word(&data_bytes[32..64])?;
-            let delayed_acc = Self::decode_b256_word(&data_bytes[64..96])?;
-            let after_delayed_count = Self::decode_u256_word(&data_bytes[96..128])?.to::<u64>();
+            let before_acc = B256::from_str(&lg.topics[2]).unwrap_or_default();
+            let after_acc = B256::from_str(&lg.topics[3]).unwrap_or_default();
+            let delayed_acc = Self::decode_b256_word(&data_bytes[0..32])?;
+            let after_delayed_count = Self::decode_u256_word(&data_bytes[32..64])?.to::<u64>();
 
-            let min_ts = Self::decode_u256_word(&data_bytes[128..160])?.to::<u64>();
-            let max_ts = Self::decode_u256_word(&data_bytes[160..192])?.to::<u64>();
-            let min_bn = Self::decode_u256_word(&data_bytes[192..224])?.to::<u64>();
-            let max_bn = Self::decode_u256_word(&data_bytes[224..256])?.to::<u64>();
+            let min_ts = Self::decode_u256_word(&data_bytes[64..96])?.to::<u64>();
+            let max_ts = Self::decode_u256_word(&data_bytes[96..128])?.to::<u64>();
+            let min_bn = Self::decode_u256_word(&data_bytes[128..160])?.to::<u64>();
+            let max_bn = Self::decode_u256_word(&data_bytes[160..192])?.to::<u64>();
             let time_bounds = crate::types::TimeBounds {
                 min_timestamp: min_ts,
                 max_timestamp: max_ts,
@@ -133,7 +133,7 @@ impl SequencerInbox for EthSequencerInbox {
                 max_block_number: max_bn,
             };
 
-            let data_loc_u256 = Self::decode_u256_word(&data_bytes[256..288])?;
+            let data_loc_u256 = Self::decode_u256_word(&data_bytes[192..224])?;
             let data_location: u8 = (data_loc_u256 & U256::from(0xff)).to::<u8>();
 
             let batch = SequencerInboxBatch {
@@ -160,7 +160,7 @@ impl SequencerInbox for EthSequencerInbox {
         block_number: u64,
         seq_num: u64,
     ) -> anyhow::Result<(Vec<u8>, B256, Vec<u64>)> {
-        let topic0: B256 = keccak256("SequencerBatchData(uint64,bytes)".as_bytes());
+        let topic0: B256 = keccak256("SequencerBatchData(uint256,bytes)".as_bytes());
         let mut topic1_bytes = [0u8; 32];
         topic1_bytes[24..32].copy_from_slice(&seq_num.to_be_bytes());
         let topic1 = B256::from_slice(&topic1_bytes);
