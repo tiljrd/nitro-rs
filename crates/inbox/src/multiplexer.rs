@@ -153,11 +153,17 @@ impl<B: InboxBackend> InboxMultiplexer<B> {
 
     pub fn pop(&mut self) -> anyhow::Result<Option<MessageWithMetadataAndBlockInfo>> {
         if self.cached_msg.is_none() {
-            let (bytes, batch_hash) = self.backend.peek_sequencer_inbox()?;
-            let seqnum = self.backend.get_sequencer_inbox_position();
-            let parsed = parse_sequencer_message(seqnum, batch_hash, &bytes)?;
-            self.cached_batch_hash = batch_hash;
-            self.cached_msg = Some(parsed);
+            match self.backend.peek_sequencer_inbox() {
+                Ok((bytes, batch_hash)) => {
+                    let seqnum = self.backend.get_sequencer_inbox_position();
+                    let parsed = parse_sequencer_message(seqnum, batch_hash, &bytes)?;
+                    self.cached_batch_hash = batch_hash;
+                    self.cached_msg = Some(parsed);
+                }
+                Err(_) => {
+                    return Ok(None);
+                }
+            }
         }
         let (msg, err) = self.get_next_msg();
         if self.is_cached_segment_last() {

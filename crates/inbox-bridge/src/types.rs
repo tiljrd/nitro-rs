@@ -1,5 +1,6 @@
 use alloy_primitives::{Address, B256, U256};
-use nitro_primitives::l1::L1IncomingMessage;
+use nitro_primitives::l1::{L1IncomingMessage, serialize_incoming_l1_message_legacy};
+use nitro_primitives::accumulator::hash_after;
 
 #[derive(Clone, Debug)]
 pub struct DelayedInboxMessage {
@@ -12,21 +13,9 @@ pub struct DelayedInboxMessage {
 
 impl DelayedInboxMessage {
     pub fn after_inbox_acc(&self) -> B256 {
-        use alloy_primitives::keccak256;
-        let header = &self.message.header;
-        let h = keccak256(
-            [
-                &[header.kind][..],
-                header.poster.as_slice(),
-                &header.block_number.to_be_bytes(),
-                &header.timestamp.to_be_bytes(),
-                header.request_id.map(|b| b.0.to_vec()).unwrap_or_default().as_slice(),
-                &header.l1_base_fee.to_be_bytes::<32>(),
-                &keccak256(&self.message.l2msg).0[..],
-            ]
-            .concat(),
-        );
-        keccak256([self.before_inbox_acc.0.to_vec(), h.0.to_vec()].concat())
+        let ser = serialize_incoming_l1_message_legacy(&self.message)
+            .expect("serialize_incoming_l1_message_legacy");
+        hash_after(self.before_inbox_acc, &ser)
     }
 }
 
