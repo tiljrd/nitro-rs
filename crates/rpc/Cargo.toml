@@ -1,3 +1,4 @@
+# keep workspace deps in sync
 [package]
 name = "nitro-rpc"
 version = "0.1.1"
@@ -11,6 +12,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
 alloy-primitives = { workspace = true }
+hex = "0.4"
 nitro-inbox = { path = "../inbox" }
 nitro-streamer = { path = "../streamer" }
+nitro-primitives = { path = "../primitives" }
 reth-arbitrum-rpc = { workspace = true }
