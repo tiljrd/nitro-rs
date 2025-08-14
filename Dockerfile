@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.6
-FROM rust:1.79 as builder
+FROM rust:latest as builder
 
 # Install git for cloning dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
