@@ -165,5 +165,14 @@ impl<D: Database> TransactionStreamer<D> {
             Err(e) if e.to_string().contains("not found") => Ok(None),
             Err(e) => Err(e),
         }
+    pub fn block_metadata_at_message_index(&self, index: u64) -> Result<Option<Vec<u8>>> {
+        let key = db_key(BLOCK_METADATA_INPUT_FEED_PREFIX, index);
+        match self.db.get(&key) {
+            Ok(v) => Ok(Some(v)),
+            Err(e) if e.to_string().contains("not found") => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     }
 }
