@@ -224,7 +224,7 @@ impl<D: Database> InboxTracker<D> {
             BatchMetadata { accumulator: B256::ZERO, message_count: 0, delayed_message_count: 0, parent_chain_block: 0 }
         };
         let mut backend = self.build_backend(batches);
-        let mut mux = InboxMultiplexer::new(&mut backend, prev_meta.delayed_message_count);
+        let mut mux = InboxMultiplexer::new(backend, prev_meta.delayed_message_count);
         let mut out: Vec<MessageWithMetadataAndBlockInfo> = Vec::new();
         loop {
             match mux.pop()? {
