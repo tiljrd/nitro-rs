@@ -110,6 +110,7 @@ impl<D: Database> InboxTracker<D> {
 
     pub fn set_delayed_count_reorg_and_write_batch(
         &self,
+        batch: &mut dyn crate::db::Batch,
         first_new_delayed_message_pos: u64,
         new_delayed_count: u64,
         can_reorg_batches: bool,
@@ -121,23 +122,22 @@ impl<D: Database> InboxTracker<D> {
                 new_delayed_count
             );
         }
-        let mut batch = self.db.new_batch();
 
         crate::util::delete_starting_at(
             self.db.as_ref(),
-            batch.as_mut(),
+            batch,
             RLP_DELAYED_MESSAGE_PREFIX,
             &uint64_to_key(new_delayed_count),
         )?;
         crate::util::delete_starting_at(
             self.db.as_ref(),
-            batch.as_mut(),
+            batch,
             PARENT_CHAIN_BLOCK_NUMBER_PREFIX,
             &uint64_to_key(new_delayed_count),
         )?;
         crate::util::delete_starting_at(
             self.db.as_ref(),
-            batch.as_mut(),
+            batch,
             LEGACY_DELAYED_MESSAGE_PREFIX,
             &uint64_to_key(new_delayed_count),
         )?;
@@ -177,7 +177,6 @@ impl<D: Database> InboxTracker<D> {
             self.delete_batch_metadata_starting_at(count)?;
         }
 
-        batch.write()?;
         Ok(())
     }
 
@@ -229,8 +228,7 @@ impl<D: Database> InboxTracker<D> {
             next_acc = hash_after(next_acc, msg_bytes);
             pos += 1;
         }
-        let enc = alloy_rlp::encode(&pos);
-        batch.put(DELAYED_MESSAGE_COUNT_KEY, &enc)?;
+        self.set_delayed_count_reorg_and_write_batch(batch.as_mut(), first_pos, pos, true)?;
         batch.write()?;
         Ok(())
     }
