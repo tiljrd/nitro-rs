@@ -9,6 +9,7 @@ pub trait Batch {
 pub trait Iterator {
     fn next(&mut self) -> bool;
     fn key(&self) -> &[u8];
+    fn value(&self) -> &[u8];
     fn release(self: Box<Self>);
     fn error(&self) -> Option<anyhow::Error>;
 }

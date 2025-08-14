@@ -1,6 +1,7 @@
 use crate::db::{Database};
 use alloy_primitives::B256;
 use nitro_primitives::dbkeys::*;
+use nitro_primitives::accumulator::hash_after;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -107,6 +108,67 @@ impl<D: Database> InboxTracker<D> {
         Ok(u64::decode(&mut dec)?)
     }
 
+    pub fn set_delayed_count_reorg_and_write_batch(&self, new_count: u64) -> anyhow::Result<()> {
+        let mut batch = self.db.new_batch();
+        let enc = alloy_rlp::encode(&new_count);
+        batch.put(DELAYED_MESSAGE_COUNT_KEY, &enc)?;
+        batch.write()?;
+        Ok(())
+    }
+
+    pub fn add_delayed_messages(&self, messages: &[(u64, B256, Vec<u8>)], snap_sync: Option<&SnapSyncConfig>) -> anyhow::Result<()> {
+        let mut next_acc = B256::ZERO;
+        let mut msgs = messages;
+        if msgs.is_empty() {
+            return Ok(());
+        }
+        let mut pos = msgs[0].0;
+        if let Some(cfg) = snap_sync {
+            if cfg.enabled && pos < cfg.delayed_count {
+                let mut first_keep = cfg.delayed_count;
+                if first_keep > 0 { first_keep -= 1; }
+                loop {
+                    if msgs.is_empty() { return Ok(()); }
+                    pos = msgs[0].0;
+                    if pos + 1 == first_keep {
+                        next_acc = msgs[0].1;
+                    }
+                    if pos < first_keep {
+                        msgs = &msgs[1..];
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        if pos > 0 {
+            if let Ok(prev) = self.get_delayed_acc(pos - 1) {
+                next_acc = prev;
+            } else {
+                anyhow::bail!("missing previous delayed message");
+            }
+        }
+        let mut batch = self.db.new_batch();
+        let first_pos = pos;
+        for (seqnum, before_acc, msg_bytes) in msgs.iter() {
+            if *seqnum != pos {
+                anyhow::bail!("unexpected delayed sequence number {}, expected {}", seqnum, pos);
+            }
+            if next_acc != *before_acc {
+                anyhow::bail!("previous delayed accumulator mismatch for message {}", seqnum);
+            }
+            let mut data = next_acc.0.to_vec();
+            data.extend_from_slice(msg_bytes);
+            let key = db_key(RLP_DELAYED_MESSAGE_PREFIX, *seqnum);
+            batch.put(&key, &data)?;
+            next_acc = hash_after(next_acc, msg_bytes);
+            pos += 1;
+        }
+        let enc = alloy_rlp::encode(&pos);
+        batch.put(DELAYED_MESSAGE_COUNT_KEY, &enc)?;
+        batch.write()?;
+        Ok(())
+    }
     pub fn delete_batch_metadata_starting_at(&self, start_index: u64) -> anyhow::Result<()> {
         let mut cache = self.batch_meta_cache.lock().unwrap();
         let mut iter = self.db.new_iterator(SEQUENCER_BATCH_META_PREFIX, &uint64_to_key(start_index));
