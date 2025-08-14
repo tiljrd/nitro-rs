@@ -1,16 +1,12 @@
 [package]
-name = "nitro-inbox-reader"
+name = "inbox-bridge"
 version = "0.1.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-tokio = { workspace = true }
 anyhow = { workspace = true }
-tracing = { workspace = true }
+tokio = { workspace = true }
 async-trait = { workspace = true }
 alloy-primitives = { workspace = true }
-
 nitro-primitives = { path = "../primitives", version = "0.1.1" }
-nitro-inbox = { path = "../inbox", version = "0.1.1" }
-inbox-bridge = { path = "../inbox-bridge", version = "0.1.1" }

@@ -3,6 +3,7 @@ members = [
     "crates/node",
     "crates/inbox",
     "crates/inbox-reader",
+    "crates/inbox-bridge",
     "crates/streamer",
     "crates/batch-poster",
     "crates/validator",
