@@ -37,8 +37,26 @@ impl NitroNode {
             loop {
                 let Ok((mut socket, _)) = listener.accept().await else { continue };
                 let _ = socket.writable().await;
-                let _ = socket.try_write(b"ok");
-                let _ = socket.shutdown().await;
+                let _ = socket.try_write(b"READY\n");
+                let _ = socket.set_nodelay(true);
+                let mut buf = [0u8; 64];
+                loop {
+                    match socket.readable().await {
+                        Ok(_) => {
+                            match socket.try_read(&mut buf) {
+                                Ok(0) => {
+                                    let _ = socket.shutdown().await;
+                                    break;
+                                }
+                                Ok(_) => {}
+                                Err(_) => {
+                                    break;
+                                }
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
             }
         });
         Ok(())
