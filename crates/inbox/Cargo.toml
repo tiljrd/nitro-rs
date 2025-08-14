@@ -15,4 +15,3 @@ brotli = "3"
 
 nitro-primitives = { path = "../primitives" }
 inbox-bridge = { path = "../inbox-bridge" }
-nitro-streamer = { path = "../streamer" }

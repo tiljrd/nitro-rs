@@ -1,3 +1,4 @@
+use nitro_inbox::streamer::Streamer;
 use anyhow::Result;
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
@@ -233,4 +234,17 @@ impl<D: Database> TransactionStreamer<D> {
 
 
 
+}
+impl<D: Database> Streamer for TransactionStreamer<D> {
+    fn reorg_at_and_end_batch(&self, first_msg_idx_reorged: u64) -> Result<()> {
+        self.reorg_at_and_end_batch(first_msg_idx_reorged)
+    }
+    fn add_messages_and_end_batch(
+        &self,
+        first_msg_idx: u64,
+        new_messages: &[MessageWithMetadataAndBlockInfo],
+        track_block_metadata_from: Option<u64>,
+    ) -> Result<()> {
+        self.add_messages_and_end_batch(first_msg_idx, new_messages, track_block_metadata_from)
+    }
 }

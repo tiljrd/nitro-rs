@@ -1,12 +1,12 @@
 use crate::db::Database;
 use crate::multiplexer::{InboxMultiplexer, InboxBackend};
+use crate::streamer::Streamer;
 use alloy_primitives::B256;
 use alloy_rlp::Decodable;
 use nitro_primitives::dbkeys::*;
 use nitro_primitives::accumulator::hash_after;
 use nitro_primitives::l1::{L1IncomingMessage, parse_incoming_l1_message_legacy, serialize_incoming_l1_message_legacy};
 use nitro_primitives::message::MessageWithMetadataAndBlockInfo;
-use nitro_streamer::streamer::TransactionStreamer;
 use inbox_bridge::types::SequencerInboxBatch;
 use std::sync::{Arc, Mutex};
 
@@ -29,11 +29,11 @@ pub struct BatchMetadata {
 pub struct InboxTracker<D: Database> {
     pub db: Arc<D>,
     pub batch_meta_cache: Mutex<lru::LruCache<u64, BatchMetadata>>,
-    pub tx_streamer: Arc<TransactionStreamer<D>>,
+    pub tx_streamer: Arc<dyn Streamer>,
 }
 
 impl<D: Database> InboxTracker<D> {
-    pub fn new(db: Arc<D>, tx_streamer: Arc<TransactionStreamer<D>>) -> Self {
+    pub fn new(db: Arc<D>, tx_streamer: Arc<dyn Streamer>) -> Self {
         Self {
             db,
             batch_meta_cache: Mutex::new(lru::LruCache::new(std::num::NonZeroUsize::new(1000).unwrap())),
