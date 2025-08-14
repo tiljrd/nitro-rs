@@ -191,7 +191,11 @@ impl NitroNode {
                 parent_chain_bound: "latest".to_string(),
                 poster_private_key_hex: std::env::var("NITRO_L1_POSTER_KEY").ok(),
             };
-            let poster = nitro_batch_poster::poster::BatchPoster::new(poster_cfg);
+            let delayed_fn = {
+                let tracker = tracker.clone();
+                std::sync::Arc::new(move || tracker.get_delayed_count().unwrap_or(0))
+            };
+            let poster = nitro_batch_poster::poster::BatchPoster::new(poster_cfg).with_delayed_count_fn(delayed_fn);
             Some(tokio::spawn(async move { let _ = poster.start().await; }))
         } else { None };
 

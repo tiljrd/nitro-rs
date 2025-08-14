@@ -9,6 +9,9 @@ use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{sol, SolCall};
 use std::str::FromStr;
 use alloy_rpc_types::TransactionRequest;
+use std::sync::{Arc, Mutex};
+
+type DelayedCountFn = Arc<dyn Fn() -> u64 + Send + Sync>;
 
 #[derive(Clone, Default)]
 pub struct BatchPosterConfig {
@@ -22,15 +25,39 @@ pub struct BatchPosterConfig {
 
 pub struct BatchPoster {
     cfg: BatchPosterConfig,
+    delayed_count_fn: Option<DelayedCountFn>,
+    last_after_delayed: Mutex<Option<u64>>,
 }
 
 impl BatchPoster {
     pub fn new(cfg: BatchPosterConfig) -> Self {
-        Self { cfg }
+        Self { cfg, delayed_count_fn: None, last_after_delayed: Mutex::new(None) }
+    }
+
+    pub fn with_delayed_count_fn(mut self, f: DelayedCountFn) -> Self {
+        self.delayed_count_fn = Some(f);
+        self
     }
 
     async fn build_batch_bytes(&self) -> Result<Option<Vec<u8>>> {
-        Ok(None)
+        let after_delayed = match &self.delayed_count_fn {
+            Some(f) => (f)(),
+            None => 0,
+        };
+        {
+            let mut guard = self.last_after_delayed.lock().unwrap();
+            if guard.as_ref() == Some(&after_delayed) {
+                return Ok(None);
+            }
+            *guard = Some(after_delayed);
+        }
+        let mut out: Vec<u8> = Vec::with_capacity(40 + 64);
+        out.extend_from_slice(&0u64.to_be_bytes());
+        out.extend_from_slice(&u64::MAX.to_be_bytes());
+        out.extend_from_slice(&0u64.to_be_bytes());
+        out.extend_from_slice(&u64::MAX.to_be_bytes());
+        out.extend_from_slice(&after_delayed.to_be_bytes());
+        Ok(Some(out))
     }
 
     fn brotli_compress(&self, data: &[u8]) -> Result<Vec<u8>> {
