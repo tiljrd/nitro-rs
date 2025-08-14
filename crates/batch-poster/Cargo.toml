@@ -12,6 +12,8 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 arb-alloy-util = { workspace = true }
 alloy-primitives = { workspace = true }
+alloy-rlp = "0.3"
+
 async-trait = { workspace = true }
 # L1 posting
 alloy-provider = "1"

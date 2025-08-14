@@ -39,7 +39,7 @@ impl BatchPoster {
         self
     }
 
-    async fn build_batch_bytes(&self) -> Result<Option<Vec<u8>>> {
+    pub async fn build_batch_bytes(&self) -> Result<Option<Vec<u8>>> {
         let after_delayed = match &self.delayed_count_fn {
             Some(f) => (f)(),
             None => 0,
