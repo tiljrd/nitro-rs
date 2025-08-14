@@ -13,14 +13,23 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 async-trait = "0.1"
 
+# Reth Arbitrum integration crates
 reth-arbitrum-node = { workspace = true }
 reth-arbitrum-evm = { workspace = true }
 reth-arbitrum-rpc = { workspace = true }
 reth-arbitrum-payload = { workspace = true }
 reth-arbitrum-primitives = { workspace = true }
 reth-arbitrum-chainspec = { workspace = true }
+
+# Reth node builder/core/api/payload handles used by engine adapter and service
+reth-node-builder = { workspace = true }
+reth-node-core = { workspace = true }
+reth-node-api = { workspace = true }
+reth-payload-builder = { workspace = true }
+
 alloy-primitives = { workspace = true }
 
+# Nitro-rs crates
 nitro-inbox = { path = "../inbox" }
 nitro-inbox-reader = { path = "../inbox-reader" }
 nitro-streamer = { path = "../streamer" }

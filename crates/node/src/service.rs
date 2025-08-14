@@ -7,6 +7,10 @@ use alloy_primitives::Address;
 
 use crate::config::NodeArgs;
 
+use reth_node_core::node_config::NodeConfig;
+use reth_node_builder::NodeBuilder;
+use reth_arbitrum_node::{ArbNode, args::RollupArgs};
+
 pub struct NitroNode {
     pub args: NodeArgs,
 }
@@ -22,13 +26,18 @@ impl NitroNode {
         let db_path = std::env::var("NITRO_DB_PATH").unwrap_or_else(|_| "./nitro-db".to_string());
         let db = Arc::new(nitro_db_sled::SledDb::open(&db_path)?);
 
-        let exec = crate::engine_adapter::RethExecEngine::new();
+        let arb_cfg = NodeConfig::test();
+        let builder = NodeBuilder::new(arb_cfg);
+        let arb_handle = builder.node(ArbNode::new(RollupArgs::default())).launch().await?;
+        let beacon_handle = arb_handle.node.add_ons_handle.beacon_engine_handle.clone();
+        let payload_handle = arb_handle.node.payload_builder_handle.clone();
+
+        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(beacon_handle, payload_handle);
         let streamer_impl = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone(), exec));
         let streamer_trait = streamer_impl.clone() as Arc<dyn nitro_inbox::streamer::Streamer>;
 
         let tracker = Arc::new(nitro_inbox::tracker::InboxTracker::new(db.clone(), streamer_trait.clone()));
         tracker.initialize()?;
-
 
         let l1_rpc = std::env::var("NITRO_L1_RPC").unwrap_or_else(|_| "http://localhost:8545".to_string());
         let header_reader = Arc::new(inbox_bridge::header_reader::HttpHeaderReader::new_http(&l1_rpc, 1000).await?);
