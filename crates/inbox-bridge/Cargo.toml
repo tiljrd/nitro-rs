@@ -6,7 +6,13 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
 async-trait = { workspace = true }
 alloy-primitives = { workspace = true }
 nitro-primitives = { path = "../primitives", version = "0.1.1" }
+
+# JSON-RPC provider for L1
+alloy-provider = "0.7"
+alloy-transport-http = "0.7"
+alloy-transport-ws = { version = "0.7", optional = true }
+alloy-rpc-types = "0.7"
