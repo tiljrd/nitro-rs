@@ -240,7 +240,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                     .await
                     .unwrap_or_default();
                 if !batches.is_empty() {
-                    self.tracker.add_sequencer_batches(&batches)?;
+                    self.tracker.add_sequencer_batches_and_stream(&batches)?;
                     fetched_any = true;
                     seen_batch_count = seen_batch_count.max(batches.last().unwrap().sequence_number + 1);
                 }
