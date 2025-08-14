@@ -173,6 +173,19 @@ impl<D: Database> TransactionStreamer<D> {
             Err(e) => Err(e),
         }
     }
+    pub fn block_hash_at_message_index(&self, index: u64) -> Result<Option<B256>> {
+        let key = db_key(BLOCK_HASH_INPUT_FEED_PREFIX, index);
+        match self.db.get(&key) {
+            Ok(v) => {
+                let mut dec = Decoder::new(&v);
+                let bh: BlockHashDbValue = BlockHashDbValue::decode(&mut dec)?;
+                Ok(bh.block_hash)
+            }
+            Err(e) if e.to_string().contains("not found") => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
 
     }
 }
