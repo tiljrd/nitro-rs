@@ -48,7 +48,7 @@ impl ExecEngine for RethExecEngine {
     async fn head_message_index(&self) -> Result<u64> {
         let data = self.db.get(MESSAGE_COUNT_KEY)?;
         let mut slice = data.as_slice();
-        let count = alloy_rlp::decode::<u64>(&mut slice)
+        let count = <u64 as alloy_rlp::Decodable>::decode(&mut slice)
             .map_err(|e| anyhow!("failed to decode message count: {e}"))?;
         if count == 0 {
             return Err(anyhow!("no messages"));

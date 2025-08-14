@@ -22,12 +22,14 @@ reth-arbitrum-primitives = { workspace = true }
 reth-arbitrum-chainspec = { workspace = true }
 
 # Reth node builder/core/api/payload handles used by engine adapter and service
-reth-node-builder = { workspace = true }
+reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-node-core = { workspace = true }
 reth-node-api = { workspace = true }
 reth-payload-builder = { workspace = true }
+reth-tasks = { workspace = true }
 
 alloy-primitives = { workspace = true }
+alloy-rlp = { workspace = true }
 
 # Nitro-rs crates
 nitro-inbox = { path = "../inbox" }

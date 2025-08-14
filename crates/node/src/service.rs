@@ -10,6 +10,7 @@ use crate::config::NodeArgs;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_builder::NodeBuilder;
 use reth_arbitrum_node::{ArbNode, args::RollupArgs};
+use reth_tasks::TaskManager;
 
 pub struct NitroNode {
     pub args: NodeArgs,
@@ -28,7 +29,14 @@ impl NitroNode {
 
         let arb_cfg = NodeConfig::test();
         let builder = NodeBuilder::new(arb_cfg);
-        let arb_handle = builder.node(ArbNode::new(RollupArgs::default())).launch().await?;
+        let task_manager = TaskManager::current();
+        let task_executor = task_manager.executor();
+        let arb_handle = builder
+            .testing_node(task_executor)
+            .node(ArbNode::new(RollupArgs::default()))
+            .launch()
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
         let beacon_handle = arb_handle.node.add_ons_handle.beacon_engine_handle.clone();
         let payload_handle = arb_handle.node.payload_builder_handle.clone();
 
