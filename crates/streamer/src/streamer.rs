@@ -206,6 +206,4 @@ impl<D: Database> TransactionStreamer<D> {
     }
 
 
-
-    }
 }
