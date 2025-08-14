@@ -108,6 +108,18 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
         self.recent_parent_chain_block_to_msg(l1block)
     }
 }
+impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxReader<B1, B2, D> {
+    pub async fn get_sequencer_message_bytes(&self, seq_num: u64) -> Result<(Vec<u8>, alloy_primitives::B256)> {
+        let metadata = self.tracker.get_batch_metadata(seq_num)?;
+        let block_num = metadata.parent_chain_block;
+        let (data, block_hash, _seen) = self
+            .sequencer_inbox
+            .get_sequencer_message_bytes_in_block(block_num, seq_num)
+            .await?;
+        Ok((data, block_hash))
+    }
+}
+
 
 
 impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxReader<B1, B2, D> {

@@ -22,6 +22,11 @@ pub trait SequencerInbox: Send + Sync {
     async fn get_batch_count(&self, block_number: u64) -> anyhow::Result<u64>;
     async fn get_accumulator(&self, seq_num: u64, block_number: u64) -> anyhow::Result<B256>;
     async fn lookup_batches_in_range(&self, from_block: u64, to_block: u64) -> anyhow::Result<Vec<SequencerInboxBatch>>;
+    async fn get_sequencer_message_bytes_in_block(
+        &self,
+        block_number: u64,
+        seq_num: u64,
+    ) -> anyhow::Result<(Vec<u8>, B256, Vec<u64>)>;
 }
 
 #[derive(Clone, Debug)]
