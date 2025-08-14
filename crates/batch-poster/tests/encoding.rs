@@ -1,4 +1,4 @@
-use nitro_batch_poster::poster::{BatchPoster, BatchPosterConfig, PosterService};
+use nitro_batch_poster::poster::{BatchPoster, BatchPosterConfig};
 use alloy_primitives::Address;
 
 #[tokio::test]

@@ -50,37 +50,6 @@ impl NitroNode {
         let db_path = std::env::var("NITRO_DB_PATH").unwrap_or_else(|_| "./nitro-db".to_string());
         let db = Arc::new(nitro_db_sled::SledDb::open(&db_path)?);
 
-        let mut rpc = RpcServerArgs::default().with_http().with_ws();
-        let http_ip: IpAddr = self
-            .args
-            .rpc_host
-            .parse()
-            .unwrap_or(Ipv4Addr::UNSPECIFIED.into());
-        rpc.http_addr = http_ip;
-        rpc.http_port = self.args.rpc_port;
-        rpc.ws_addr = http_ip;
-        rpc.ws_port = self.args.ws_port;
-
-        let arb_cfg = NodeConfig::test().with_rpc(rpc);
-        let builder = NodeBuilder::new(arb_cfg);
-        let task_manager = TaskManager::current();
-        let task_executor = task_manager.executor();
-        let arb_handle = builder
-            .testing_node(task_executor)
-            .node(ArbNode::new(RollupArgs::default()))
-            .launch()
-            .await
-            .map_err(|e| anyhow::anyhow!(e))?;
-        let beacon_handle = arb_handle.node.add_ons_handle.beacon_engine_handle.clone();
-        let payload_handle = arb_handle.node.payload_builder_handle.clone();
-
-        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(db.clone(), beacon_handle, payload_handle);
-        let streamer_impl = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone(), exec));
-        let streamer_trait = streamer_impl.clone() as Arc<dyn nitro_inbox::streamer::Streamer>;
-
-        let tracker = Arc::new(nitro_inbox::tracker::InboxTracker::new(db.clone(), streamer_trait.clone()));
-        tracker.initialize()?;
-
         let mut l1_rpc = std::env::var("NITRO_L1_RPC").unwrap_or_else(|_| "http://localhost:8545".to_string());
         let mut delayed_bridge_addr_opt: Option<Address> = None;
         let mut sequencer_inbox_addr_opt: Option<Address> = None;
@@ -89,6 +58,9 @@ impl NitroNode {
         let mut poster_privkey_cfg: Option<String> = std::env::var("NITRO_L1_POSTER_KEY").ok();
         let mut feed_enable_cfg = self.args.feed_enable;
         let mut feed_port_cfg = self.args.feed_port;
+        let mut rpc_host_cfg = self.args.rpc_host.clone();
+        let mut rpc_http_port_cfg = self.args.rpc_port;
+        let mut rpc_ws_port_cfg = self.args.ws_port;
 
         if let Some(conf_path) = self.args.conf_file.clone() {
             if let Ok(text) = std::fs::read_to_string(&conf_path) {
@@ -110,6 +82,18 @@ impl NitroNode {
                     }
                     if let Some(p) = v.pointer("/node/feed/output/port").and_then(|x| x.as_u64()) {
                         feed_port_cfg = p as u16;
+                    }
+                    if let Some(addr) = v.pointer("/http/addr").and_then(|x| x.as_str()) {
+                        rpc_host_cfg = addr.to_string();
+                    }
+                    if let Some(addr) = v.pointer("/ws/addr").and_then(|x| x.as_str()) {
+                        rpc_host_cfg = addr.to_string();
+                    }
+                    if let Some(p) = v.pointer("/http/port").and_then(|x| x.as_u64()) {
+                        rpc_http_port_cfg = p as u16;
+                    }
+                    if let Some(p) = v.pointer("/ws/port").and_then(|x| x.as_u64()) {
+                        rpc_ws_port_cfg = p as u16;
                     }
                     let info_files = v.pointer("/chain/info-files").and_then(|x| x.as_array()).cloned().unwrap_or_default();
                     if let Some(info_path_val) = info_files.get(0).and_then(|x| x.as_str()) {
@@ -138,6 +122,30 @@ impl NitroNode {
             }
         }
 
+        let mut rpc = RpcServerArgs::default().with_http().with_ws();
+        let http_ip: IpAddr = rpc_host_cfg.parse().unwrap_or(Ipv4Addr::UNSPECIFIED.into());
+        rpc.http_addr = http_ip;
+        rpc.http_port = rpc_http_port_cfg;
+        rpc.ws_addr = http_ip;
+        rpc.ws_port = rpc_ws_port_cfg;
+
+        let arb_cfg = NodeConfig::test().with_rpc(rpc);
+        let builder = NodeBuilder::new(arb_cfg);
+        let task_manager = TaskManager::current();
+        let task_executor = task_manager.executor();
+        let arb_handle = builder
+            .testing_node(task_executor)
+            .node(ArbNode::new(RollupArgs::default()))
+            .launch()
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+        let beacon_handle = arb_handle.node.add_ons_handle.beacon_engine_handle.clone();
+        let payload_handle = arb_handle.node.payload_builder_handle.clone();
+
+        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(db.clone(), beacon_handle, payload_handle);
+        let streamer_impl = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone(), exec));
+        let streamer_trait = streamer_impl.clone() as Arc<dyn nitro_inbox::streamer::Streamer>;
+
         let header_reader = Arc::new(inbox_bridge::header_reader::HttpHeaderReader::new_http(&l1_rpc, 1000).await?);
 
         let delayed_bridge_addr = if let Some(a) = delayed_bridge_addr_opt {
@@ -164,6 +172,9 @@ impl NitroNode {
         ).await?);
 
         let reader_config: nitro_inbox_reader::reader::InboxReaderConfigFetcher = Arc::new(|| nitro_inbox_reader::reader::InboxReaderConfig::default());
+
+        let tracker = Arc::new(nitro_inbox::tracker::InboxTracker::new(db.clone(), streamer_trait.clone()));
+        tracker.initialize()?;
 
         let first_msg_block: u64 = std::env::var("NITRO_FIRST_MESSAGE_BLOCK")
             .ok()
