@@ -10,4 +10,10 @@ pub trait Streamer: Send + Sync {
         new_messages: &[MessageWithMetadataAndBlockInfo],
         track_block_metadata_from: Option<u64>,
     ) -> Result<()>;
+    fn add_confirmed_messages_and_end_batch(
+        &self,
+        first_msg_idx: u64,
+        new_messages: &[MessageWithMetadataAndBlockInfo],
+        track_block_metadata_from: Option<u64>,
+    ) -> Result<()>;
 }

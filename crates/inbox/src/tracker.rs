@@ -233,7 +233,7 @@ impl<D: Database> InboxTracker<D> {
             }
         }
         if !out.is_empty() {
-            self.tx_streamer.add_messages_and_end_batch(prev_meta.message_count, &out, None)?;
+            self.tx_streamer.add_confirmed_messages_and_end_batch(prev_meta.message_count, &out, None)?;
         }
         Ok(())
     }

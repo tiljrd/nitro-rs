@@ -397,4 +397,12 @@ impl<D: Database> Streamer for TransactionStreamer<D> {
     ) -> Result<()> {
         self.add_messages_and_end_batch(first_msg_idx, new_messages, track_block_metadata_from)
     }
+    fn add_confirmed_messages_and_end_batch(
+        &self,
+        first_msg_idx: u64,
+        new_messages: &[MessageWithMetadataAndBlockInfo],
+        track_block_metadata_from: Option<u64>,
+    ) -> Result<()> {
+        self.add_confirmed_messages_and_end_batch(first_msg_idx, new_messages, track_block_metadata_from)
+    }
 }
