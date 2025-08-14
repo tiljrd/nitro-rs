@@ -1,5 +1,5 @@
 use nitro_inbox::streamer::Streamer;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable};
 use nitro_inbox::db::{Batch, Database};
@@ -140,6 +140,72 @@ impl<D: Database> TransactionStreamer<D> {
             )?;
         }
         Ok(())
+    }
+    fn get_prev_prev_delayed_read(&self, msg_idx: u64) -> Result<u64> {
+        if msg_idx == 0 {
+            return Ok(0);
+        }
+        let prev = self.get_message(msg_idx - 1)?;
+        Ok(prev.delayed_messages_read)
+    }
+
+    fn count_duplicate_messages(
+        &self,
+        mut msg_idx: u64,
+        messages: &[MessageWithMetadataAndBlockInfo],
+        mut batch: Option<&mut dyn Batch>,
+    ) -> Result<(u64, bool, Option<MessageWithMetadata>)> {
+        let mut cur: u64 = 0;
+        while (cur as usize) < messages.len() {
+            let key = db_key(MESSAGE_PREFIX, msg_idx);
+            let have = match self.db.get(&key) {
+                Ok(v) => v,
+                Err(e) if e.to_string().contains("not found") => break,
+                Err(e) => return Err(e),
+            };
+
+            let want = alloy_rlp::encode(&messages[cur as usize].message_with_meta);
+            if have != want {
+                let mut slice = have.as_slice();
+                let db_msg = match MessageWithMetadata::decode(&mut slice) {
+                    Ok(m) => m,
+                    Err(_) => {
+                        return Ok((cur, true, None));
+                    }
+                };
+
+                let next = &messages[cur as usize].message_with_meta;
+
+                let mut is_duplicate = false;
+                let mut db_cmp = db_msg.clone();
+                let mut next_cmp = next.clone();
+                if db_cmp.message.batch_gas_cost.is_none() || next_cmp.message.batch_gas_cost.is_none() {
+                    db_cmp.message.batch_gas_cost = None;
+                    next_cmp.message.batch_gas_cost = None;
+                    if db_cmp == next_cmp {
+                        is_duplicate = true;
+                        if let Some(b) = batch.as_deref_mut() {
+                            if messages[cur as usize].message_with_meta.message.batch_gas_cost.is_some() {
+                                let _ = self.write_message(
+                                    msg_idx,
+                                    &messages[cur as usize],
+                                    b,
+                                    None,
+                                );
+                            }
+                        }
+                    }
+                }
+
+                if !is_duplicate {
+                    return Ok((cur, true, Some(db_msg)));
+                }
+            }
+
+            cur += 1;
+            msg_idx += 1;
+        }
+        Ok((cur, false, None))
     }
 
     pub fn message_count(&self) -> Result<u64> {

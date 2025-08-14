@@ -2,7 +2,7 @@ use alloy_primitives::B256;
 use alloy_rlp::{Decodable, Encodable, Header};
 use crate::l1::L1IncomingMessage;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MessageWithMetadata {
     pub message: L1IncomingMessage,
     pub delayed_messages_read: u64,
