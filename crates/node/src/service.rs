@@ -22,8 +22,11 @@ impl NitroNode {
         let db_path = std::env::var("NITRO_DB_PATH").unwrap_or_else(|_| "./nitro-db".to_string());
         let db = Arc::new(nitro_db_sled::SledDb::open(&db_path)?);
 
-        let tracker = Arc::new(nitro_inbox::tracker::InboxTracker::new(db.clone()));
+        let streamer = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone())) as Arc<dyn nitro_inbox::streamer::Streamer>;
+
+        let tracker = Arc::new(nitro_inbox::tracker::InboxTracker::new(db.clone(), streamer.clone()));
         tracker.initialize()?;
+
 
         let l1_rpc = std::env::var("NITRO_L1_RPC").unwrap_or_else(|_| "http://localhost:8545".to_string());
         let header_reader = Arc::new(inbox_bridge::header_reader::HttpHeaderReader::new_http(&l1_rpc, 1000).await?);
