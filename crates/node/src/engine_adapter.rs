@@ -14,7 +14,7 @@ use reth_arbitrum_node::ArbEngineTypes;
 use reth_arbitrum_payload::ArbPayloadTypes;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use alloy_primitives::{Address, B256};
-use reth_node_api::PayloadAttributes;
+use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use reth_payload_primitives::PayloadKind;
 
 
@@ -88,7 +88,7 @@ impl ExecEngine for RethExecEngine {
         };
         let parent_hash = prev.block_hash;
 
-        let rpc_attrs = PayloadAttributes {
+        let rpc_attrs = EthPayloadAttributes {
             timestamp: msg.message.header.timestamp,
             prev_randao: B256::ZERO,
             suggested_fee_recipient: Address::ZERO,
