@@ -99,10 +99,26 @@ impl SequencerInbox for EthSequencerInbox {
                 }
             }
             last_seq = Some(seq);
+
             let before_acc = Self::decode_b256_word(&lg.data[0..32])?;
             let after_acc = Self::decode_b256_word(&lg.data[32..64])?;
             let delayed_acc = Self::decode_b256_word(&lg.data[64..96])?;
             let after_delayed_count = Self::decode_u256_word(&lg.data[96..128])?.to::<u64>();
+
+            let min_ts = Self::decode_u256_word(&lg.data[128..160])?.to::<u64>();
+            let max_ts = Self::decode_u256_word(&lg.data[160..192])?.to::<u64>();
+            let min_bn = Self::decode_u256_word(&lg.data[192..224])?.to::<u64>();
+            let max_bn = Self::decode_u256_word(&lg.data[224..256])?.to::<u64>();
+            let time_bounds = crate::types::TimeBounds {
+                min_timestamp: min_ts,
+                max_timestamp: max_ts,
+                min_block_number: min_bn,
+                max_block_number: max_bn,
+            };
+
+            let data_loc_u256 = Self::decode_u256_word(&lg.data[256..288])?;
+            let data_location: u8 = (data_loc_u256 & U256::from(0xff)).to::<u8>();
+
             let batch = SequencerInboxBatch {
                 sequence_number: seq,
                 before_inbox_acc: before_acc,
@@ -110,6 +126,9 @@ impl SequencerInbox for EthSequencerInbox {
                 after_message_count: 0,
                 after_delayed_count,
                 after_delayed_acc: delayed_acc,
+                time_bounds,
+                data_location,
+                bridge_address: lg.address.unwrap_or_default(),
                 parent_chain_block_number: lg.block_number.unwrap_or_default(),
                 block_hash: lg.block_hash.unwrap_or_default(),
                 serialized: Vec::new(),

@@ -31,6 +31,14 @@ impl DelayedInboxMessage {
 }
 
 #[derive(Clone, Debug)]
+pub struct TimeBounds {
+    pub min_timestamp: u64,
+    pub max_timestamp: u64,
+    pub min_block_number: u64,
+    pub max_block_number: u64,
+}
+
+#[derive(Clone, Debug)]
 pub struct SequencerInboxBatch {
     pub sequence_number: u64,
     pub before_inbox_acc: B256,
@@ -38,6 +46,9 @@ pub struct SequencerInboxBatch {
     pub after_message_count: u64,
     pub after_delayed_count: u64,
     pub after_delayed_acc: B256,
+    pub time_bounds: TimeBounds,
+    pub data_location: u8,
+    pub bridge_address: Address,
     pub parent_chain_block_number: u64,
     pub block_hash: B256,
     pub serialized: Vec<u8>,
