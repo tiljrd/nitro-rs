@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1.6
 FROM rust:latest as builder
 
-# Install git for cloning dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+# Install build dependencies (git, clang/libclang, llvm, build tools)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git clang libclang-dev llvm-dev pkg-config cmake make g++ libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Prepare workspace and clone external path dependencies expected by Cargo.toml
 WORKDIR /
