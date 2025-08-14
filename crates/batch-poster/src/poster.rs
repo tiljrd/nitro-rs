@@ -162,22 +162,38 @@ impl BatchPoster {
         };
         let signer = PrivateKeySigner::from_str(&key_hex)?;
         let provider = ProviderBuilder::new()
-
             .wallet(signer)
             .connect_http(self.cfg.l1_rpc_url.parse()?);
 
         sol! {
             interface ISequencerInbox {
-                function addSequencerL2BatchFromOrigin(uint256, uint256, bytes) external;
+                function addSequencerL2BatchFromOrigin(
+                    uint256 sequenceNumber,
+                    bytes data,
+                    uint256 afterDelayedMessagesRead,
+                    address gasRefunder,
+                    uint256 prevMessageCount,
+                    uint256 newMessageCount
+                ) external;
             }
         }
 
         let sequence_number = U256::ZERO;
-        let gas_refunder = U256::ZERO;
+        let after_delayed = {
+            let guard = self.last_after_delayed.lock().unwrap();
+            U256::from(guard.unwrap_or(0u64))
+        };
+        let gas_refunder: Address = Address::ZERO;
+        let prev_message_count = U256::ZERO;
+        let new_message_count = U256::ZERO;
+
         let calldata = ISequencerInbox::addSequencerL2BatchFromOriginCall {
-            _0: sequence_number,
-            _1: gas_refunder,
-            _2: data.to_vec(),
+            sequenceNumber: sequence_number,
+            data: data.to_vec().into(),
+            afterDelayedMessagesRead: after_delayed,
+            gasRefunder: gas_refunder.into(),
+            prevMessageCount: prev_message_count,
+            newMessageCount: new_message_count,
         }
         .abi_encode();
 
