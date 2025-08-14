@@ -34,11 +34,20 @@ async fn main() -> anyhow::Result<()> {
             || arg.starts_with("--poster-4844-enable")
             || arg.starts_with("--validator-enable");
         if is_supported {
+            let takes_value = arg.starts_with("--network")
+                || arg.starts_with("--sync-till-block")
+                || arg.starts_with("--conf.file")
+                || arg.starts_with("--rpc-host")
+                || arg.starts_with("--rpc-port")
+                || arg.starts_with("--ws-port")
+                || arg.starts_with("--feed-port");
             filtered.push(arg.clone());
-            if !arg.contains('=') {
+            if takes_value && !arg.contains('=') {
                 if let Some(val) = it.next() {
                     if !val.starts_with('-') {
                         filtered.push(val);
+                    } else {
+                        filtered.push(val.clone());
                     }
                 }
             }
