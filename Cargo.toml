@@ -39,6 +39,7 @@ reth-node-core = { path = "../reth/crates/node/core" }
 reth-node-builder = { path = "../reth/crates/node/builder" }
 reth-node-api = { path = "../reth/crates/node/api" }
 reth-payload-builder = { path = "../reth/crates/payload/builder" }
+reth-payload-primitives = { path = "../reth/crates/payload/primitives" }
 reth-rpc-api = { path = "../reth/crates/rpc/rpc-api" }
 reth-tasks = { path = "../reth/crates/tasks" }
 
