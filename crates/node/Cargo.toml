@@ -26,10 +26,12 @@ reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-node-core = { workspace = true }
 reth-node-api = { workspace = true }
 reth-payload-builder = { workspace = true }
+reth-payload-primitives = { workspace = true }
 reth-tasks = { workspace = true }
 
 alloy-primitives = { workspace = true }
 alloy-rlp = { workspace = true }
+alloy-rpc-types = "0.6"
 
 # Nitro-rs crates
 nitro-inbox = { path = "../inbox" }

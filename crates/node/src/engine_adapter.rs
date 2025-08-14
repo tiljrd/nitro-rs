@@ -14,7 +14,8 @@ use reth_arbitrum_node::ArbEngineTypes;
 use reth_arbitrum_payload::ArbPayloadTypes;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use alloy_primitives::{Address, B256};
-use alloy_rpc_types_engine::PayloadAttributes;
+use alloy_rpc_types::engine::PayloadAttributes;
+use reth_payload_primitives::PayloadKind;
 
 
 type PayloadTy = ArbEngineTypes<ArbPayloadTypes>;
@@ -95,15 +96,14 @@ impl ExecEngine for RethExecEngine {
             parent_beacon_block_root: None,
         };
 
-        let attrs = EthPayloadBuilderAttributes::try_new(parent_hash, rpc_attrs, 2)
-            .map_err(|_e| anyhow!("failed to construct builder attributes"))?;
+        let attrs = EthPayloadBuilderAttributes::new(parent_hash, rpc_attrs);
         let id = builder
             .send_new_payload(attrs)
             .await
             .map_err(|_| anyhow!("failed to get payload id"))??;
 
         let built = builder
-            .resolve(id)
+            .resolve_kind(id, PayloadKind::Earliest)
             .await
             .ok_or_else(|| anyhow!("payload resolve channel closed"))??;
 
