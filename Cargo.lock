@@ -4644,8 +4644,10 @@ dependencies = [
  "anyhow",
  "async-trait",
  "inbox-bridge",
+ "nitro-db-sled",
  "nitro-inbox",
  "nitro-primitives",
+ "tempfile",
  "tokio",
  "tracing",
 ]
