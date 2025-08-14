@@ -10,6 +10,8 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 nitro-inbox = { path = "../inbox" }
+nitro-primitives = { path = "../primitives" }
 reth-arbitrum-evm = { workspace = true }
 reth-arbitrum-payload = { workspace = true }
 reth-arbitrum-primitives = { workspace = true }
+alloy-rlp = { workspace = true }
