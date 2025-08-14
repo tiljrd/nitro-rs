@@ -34,5 +34,9 @@ pub struct SequencerInboxBatch {
     pub sequence_number: u64,
     pub before_inbox_acc: B256,
     pub after_inbox_acc: B256,
+    pub after_delayed_count: u64,
+    pub after_delayed_acc: B256,
+    pub parent_chain_block_number: u64,
     pub block_hash: B256,
+    pub serialized: Vec<u8>,
 }

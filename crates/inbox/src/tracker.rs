@@ -3,12 +3,15 @@ use alloy_primitives::B256;
 use nitro_primitives::dbkeys::*;
 use nitro_primitives::accumulator::hash_after;
 use nitro_primitives::l1::{L1IncomingMessage, parse_incoming_l1_message_legacy, serialize_incoming_l1_message_legacy};
+use inbox_bridge::types::SequencerInboxBatch;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub struct SnapSyncConfig {
     pub enabled: bool,
     pub delayed_count: u64,
+    pub batch_count: u64,
+    pub prev_batch_message_count: u64,
 }
 
 #[derive(Clone)]
@@ -117,6 +120,90 @@ impl<D: Database> InboxTracker<D> {
             true,
         )?;
         batch.write()?;
+        Ok(())
+    }
+
+    pub fn add_sequencer_batches(&self, batches: &[SequencerInboxBatch]) -> anyhow::Result<()> {
+        if batches.is_empty() {
+            return Ok(());
+        }
+        let mut next_acc = B256::ZERO;
+        let mut prev_meta = BatchMetadata {
+            accumulator: B256::ZERO,
+            message_count: 0,
+            delayed_message_count: 0,
+            parent_chain_block: 0,
+        };
+        let mut pos = batches[0].sequence_number;
+        if pos > 0 {
+            prev_meta = self.get_batch_metadata(pos - 1)?;
+            next_acc = prev_meta.accumulator;
+        }
+        let mut db_batch = self.db.new_batch();
+        crate::util::delete_starting_at(
+            self.db.as_ref(),
+            db_batch.as_mut(),
+            DELAYED_SEQUENCED_PREFIX,
+            &uint64_to_key(prev_meta.delayed_message_count + 1),
+        )?;
+        for b in batches {
+            if b.sequence_number != pos {
+                anyhow::bail!("unexpected batch sequence number {} expected {}", b.sequence_number, pos);
+            }
+            if next_acc != b.before_inbox_acc {
+                anyhow::bail!("previous batch accumulator mismatch");
+            }
+            if b.after_delayed_count > 0 {
+                let have_delayed = self.get_delayed_acc(b.after_delayed_count - 1).ok();
+                if have_delayed != Some(b.after_delayed_acc) {
+                    anyhow::bail!("delayed message accumulator doesn't match sequencer batch");
+                }
+            }
+            next_acc = b.after_inbox_acc;
+            pos += 1;
+        }
+
+        let mut last_meta = prev_meta.clone();
+        let mut to_cache: Vec<(u64, BatchMetadata)> = Vec::with_capacity(batches.len());
+        for b in batches {
+            let msg_count_for_batch = last_meta.message_count + 1;
+            let meta = BatchMetadata {
+                accumulator: b.after_inbox_acc,
+                message_count: msg_count_for_batch,
+                delayed_message_count: b.after_delayed_count,
+                parent_chain_block: b.parent_chain_block_number,
+            };
+            let mut meta_bytes = Vec::new();
+            meta_bytes.extend_from_slice(&alloy_rlp::encode(&meta.accumulator));
+            meta_bytes.extend_from_slice(&alloy_rlp::encode(&meta.message_count));
+            meta_bytes.extend_from_slice(&alloy_rlp::encode(&meta.delayed_message_count));
+            meta_bytes.extend_from_slice(&alloy_rlp::encode(&meta.parent_chain_block));
+            let meta_key = db_key(SEQUENCER_BATCH_META_PREFIX, b.sequence_number);
+            db_batch.put(&meta_key, &meta_bytes)?;
+
+            if b.after_delayed_count > last_meta.delayed_message_count {
+                let val = alloy_rlp::encode(&b.sequence_number);
+                let key = db_key(DELAYED_SEQUENCED_PREFIX, b.after_delayed_count);
+                db_batch.put(&key, &val)?;
+            }
+
+            to_cache.push((b.sequence_number, meta.clone()));
+            last_meta = meta;
+        }
+
+        self.delete_batch_metadata_starting_at(pos)?;
+        let enc = alloy_rlp::encode(&pos);
+        db_batch.put(SEQUENCER_BATCH_COUNT_KEY, &enc)?;
+        db_batch.write()?;
+
+        let mut cache = self.batch_meta_cache.lock().unwrap();
+        for (seq, meta) in to_cache {
+            cache.push(seq, meta);
+        }
+
+        Ok(())
+    }
+
         Ok(())
     }
 

@@ -13,3 +13,4 @@ arb-alloy-util = { workspace = true }
 lru = { workspace = true }
 
 nitro-primitives = { path = "../primitives" }
+inbox-bridge = { path = "../inbox-bridge" }
