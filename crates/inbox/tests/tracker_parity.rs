@@ -110,12 +110,14 @@ fn tracker_reorg_delayed_rolls_back_and_deletes_future_mappings() {
     let tracker = InboxTracker::new(db.clone(), streamer);
     tracker.initialize().unwrap();
 
+    let mut prev_acc = B256::ZERO;
     for i in 0..3 {
         let dm = l1_msg(20 + i, 300 + i, &[i as u8]);
         let ser = serialize_incoming_l1_message_legacy(&dm).unwrap();
         tracker
-            .add_delayed_messages(&[(i, B256::ZERO, ser)], None)
+            .add_delayed_messages(&[(i, prev_acc, ser)], None)
             .unwrap();
+        prev_acc = tracker.get_delayed_acc(i).unwrap();
     }
     assert_eq!(tracker.get_delayed_count().unwrap(), 3);
 
