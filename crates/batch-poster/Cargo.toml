@@ -11,3 +11,4 @@ tracing = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 arb-alloy-util = { workspace = true }
 alloy-primitives = { workspace = true }
+async-trait = { workspace = true }

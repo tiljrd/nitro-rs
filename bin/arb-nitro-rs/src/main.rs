@@ -24,7 +24,15 @@ async fn main() -> anyhow::Result<()> {
             || arg.starts_with("--sync-till-block")
             || arg == "--sequencer"
             || arg.starts_with("--sequencer")
-            || arg.starts_with("--conf.file");
+            || arg.starts_with("--conf.file")
+            || arg.starts_with("--rpc-host")
+            || arg.starts_with("--rpc-port")
+            || arg.starts_with("--ws-port")
+            || arg.starts_with("--feed-enable")
+            || arg.starts_with("--feed-port")
+            || arg.starts_with("--poster-enable")
+            || arg.starts_with("--poster-4844-enable")
+            || arg.starts_with("--validator-enable");
         if is_supported {
             filtered.push(arg.clone());
             if !arg.contains('=') {

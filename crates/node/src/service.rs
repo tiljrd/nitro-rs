@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::info;
@@ -19,6 +20,34 @@ pub struct NitroNode {
 impl NitroNode {
     pub fn new(args: NodeArgs) -> Self {
         Self { args }
+    }
+
+    async fn start_rpc_servers(&self, arb_handle: &reth_node_builder::LaunchedNode<reth_arbitrum_node::ArbNode<reth_arbitrum_node::ArbEngineTypes<reth_arbitrum_payload::ArbPayloadTypes>>>) -> Result<()> {
+        let rpc_host = self.args.rpc_host.clone();
+        let rpc_port = self.args.rpc_port;
+        let ws_port = self.args.ws_port;
+        let http_addr: SocketAddr = format!("{}:{}", rpc_host, rpc_port).parse().unwrap();
+        let ws_addr: SocketAddr = format!("{}:{}", rpc_host, ws_port).parse().unwrap();
+        let _ = arb_handle.node.start_http_server(http_addr).await.map_err(|e| anyhow::anyhow!(e))?;
+        let _ = arb_handle.node.start_ws_server(ws_addr).await.map_err(|e| anyhow::anyhow!(e))?;
+        Ok(())
+    }
+
+    async fn start_feed_server(&self, _tracker: Arc<nitro_inbox::tracker::InboxTracker<nitro_db_sled::SledDb>>) -> Result<()> {
+        if !self.args.feed_enable {
+            return Ok(());
+        }
+        let addr: SocketAddr = format!("0.0.0.0:{}", self.args.feed_port).parse().unwrap();
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else { continue };
+                let _ = socket.writable().await;
+                let _ = socket.try_write(b"ok");
+                let _ = socket.shutdown().await;
+            }
+        });
+        Ok(())
     }
 
     pub async fn start(self) -> Result<()> {
@@ -132,12 +161,47 @@ impl NitroNode {
             }
         });
 
-        let reader_task = tokio::spawn(async move {
-            let _ = inbox_reader.start().await;
+        let reader_task = tokio::spawn({
+            let inbox_reader = inbox_reader;
+            async move {
+                let _ = inbox_reader.start().await;
+            }
         });
 
-        let _ = tokio::join!(reader_task, streamer_task);
+        let feed_task = tokio::spawn({
+            let this = self.clone_args();
+            let tracker = tracker.clone();
+            async move {
+                let _ = this.start_feed_server(tracker).await;
+            }
+        });
+
+        let rpc_task = tokio::spawn({
+            let this = self.clone_args();
+            let arb_handle = arb_handle.clone();
+            async move {
+                let _ = this.start_rpc_servers(&arb_handle).await;
+            }
+        });
+
+        let poster_task = if self.args.poster_enable {
+            let poster = nitro_batch_poster::poster::BatchPoster::new();
+            Some(tokio::spawn(async move { let _ = poster.start().await; }))
+        } else { None };
+
+        let validator_task = if self.args.validator_enable {
+            let validator = nitro_validator::Validator::new();
+            Some(tokio::spawn(async move { let _ = validator.start().await; }))
+        } else { None };
+
+        let _ = tokio::join!(reader_task, streamer_task, feed_task, rpc_task);
+        if let Some(t) = poster_task { let _ = t.await; }
+        if let Some(t) = validator_task { let _ = t.await; }
 
         Ok(())
+    }
+
+    fn clone_args(&self) -> Self {
+        Self { args: self.args.clone() }
     }
 }
