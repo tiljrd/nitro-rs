@@ -1,5 +1,6 @@
-use crate::db::{Database};
+use crate::db::Database;
 use alloy_primitives::B256;
+use alloy_rlp::Decodable;
 use nitro_primitives::dbkeys::*;
 use nitro_primitives::accumulator::hash_after;
 use nitro_primitives::l1::{L1IncomingMessage, parse_incoming_l1_message_legacy, serialize_incoming_l1_message_legacy};
@@ -66,8 +67,8 @@ impl<D: Database> InboxTracker<D> {
 
     pub fn get_delayed_count(&self) -> anyhow::Result<u64> {
         let data = self.db.get(DELAYED_MESSAGE_COUNT_KEY)?;
-        let mut dec = alloy_rlp::Decoder::new(&data);
-        Ok(u64::decode(&mut dec)?)
+        let mut bytes = &data[..];
+        Ok(u64::decode(&mut bytes)?)
     }
 
     pub fn get_batch_metadata(&self, seqnum: u64) -> anyhow::Result<BatchMetadata> {
@@ -79,18 +80,18 @@ impl<D: Database> InboxTracker<D> {
             anyhow::bail!("accumulator not found: no metadata for batch {}", seqnum);
         }
         let data = self.db.get(&key)?;
-        let mut dec = alloy_rlp::Decoder::new(&data);
-        let acc: B256 = B256::decode(&mut dec)?;
-        let msg_count: u64 = u64::decode(&mut dec)?;
-        let delayed_count: u64 = u64::decode(&mut dec)?;
-        let parent_block: u64 = u64::decode(&mut dec)?;
+        let mut bytes = &data[..];
+        let acc: B256 = B256::decode(&mut bytes)?;
+        let msg_count: u64 = u64::decode(&mut bytes)?;
+        let delayed_count: u64 = u64::decode(&mut bytes)?;
+        let parent_block: u64 = u64::decode(&mut bytes)?;
         let meta = BatchMetadata {
             accumulator: acc,
             message_count: msg_count,
             delayed_message_count: delayed_count,
             parent_chain_block: parent_block,
         };
-        self.batch_meta_cache.lock().unwrap().push(seqnum, meta.clone());
+        self.batch_meta_cache.lock().unwrap().put(seqnum, meta.clone());
         Ok(meta)
     }
 
@@ -108,8 +109,8 @@ impl<D: Database> InboxTracker<D> {
 
     pub fn get_batch_count(&self) -> anyhow::Result<u64> {
         let data = self.db.get(SEQUENCER_BATCH_COUNT_KEY)?;
-        let mut dec = alloy_rlp::Decoder::new(&data);
-        Ok(u64::decode(&mut dec)?)
+        let mut bytes = &data[..];
+        Ok(u64::decode(&mut bytes)?)
     }
     pub fn reorg_delayed_to(&self, new_delayed_count: u64) -> anyhow::Result<()> {
         let mut batch = self.db.new_batch();
@@ -198,7 +199,7 @@ impl<D: Database> InboxTracker<D> {
 
         let mut cache = self.batch_meta_cache.lock().unwrap();
         for (seq, meta) in to_cache {
-            cache.push(seq, meta);
+            cache.put(seq, meta);
         }
 
         Ok(())
@@ -248,8 +249,8 @@ impl<D: Database> InboxTracker<D> {
         let mut reorg_seq_batches_to_count: Option<u64> = None;
         while seq_iter.next() {
             let val = seq_iter.value();
-            let mut dec = alloy_rlp::Decoder::new(val);
-            let batch_seq_num: u64 = u64::decode(&mut dec)?;
+            let mut bytes = val;
+            let batch_seq_num: u64 = u64::decode(&mut bytes)?;
             if !can_reorg_batches {
                 anyhow::bail!(
                     "reorging of sequencer batch number {} via delayed messages reorg to count {} disabled",
@@ -341,7 +342,7 @@ impl<D: Database> InboxTracker<D> {
                 let mut idx_bytes = [0u8; 8];
                 idx_bytes.copy_from_slice(&key[prefix_len..prefix_len + 8]);
                 let idx = u64::from_be_bytes(idx_bytes);
-                cache.remove(&idx);
+                cache.pop(&idx);
             }
         }
         if let Some(err) = iter.error() {
@@ -377,6 +378,10 @@ impl<D: Database> InboxTracker<D> {
             }
             if high == low {
                 return Ok((high, true));
+            }
+        }
+    }
+
     pub fn legacy_get_delayed_message_and_accumulator(&self, seqnum: u64) -> anyhow::Result<(L1IncomingMessage, B256)> {
         let key = db_key(LEGACY_DELAYED_MESSAGE_PREFIX, seqnum);
         let data = self.db.get(&key)?;
@@ -396,8 +401,8 @@ impl<D: Database> InboxTracker<D> {
                 anyhow::bail!("delayed message new entry missing accumulator");
             }
             let acc = B256::from_slice(&data[..32]);
-            let mut dec = alloy_rlp::Decoder::new(&data[32..]);
-            let msg: L1IncomingMessage = L1IncomingMessage::decode(&mut dec)?;
+            let mut bytes = &data[32..];
+            let msg: L1IncomingMessage = L1IncomingMessage::decode(&mut bytes)?;
             let pkey = db_key(PARENT_CHAIN_BLOCK_NUMBER_PREFIX, seqnum);
             let parent_block = if self.db.has(&pkey)? {
                 let v = self.db.get(&pkey)?;
@@ -426,11 +431,4 @@ impl<D: Database> InboxTracker<D> {
     }
 
 
-            }
-        }
-    }
 }
-
-trait RlpDecodeExt: alloy_rlp::Decodable {}
-impl RlpDecodeExt for u64 {}
-impl RlpDecodeExt for B256 {}

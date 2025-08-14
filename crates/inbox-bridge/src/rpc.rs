@@ -19,9 +19,7 @@ struct RpcReq<'a, T> {
 struct RpcResp<T> {
     jsonrpc: String,
     id: u64,
-    #[serde(default)]
     result: Option<T>,
-    #[serde(default)]
     error: Option<RpcError>,
 }
 

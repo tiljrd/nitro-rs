@@ -15,3 +15,4 @@ reth-arbitrum-evm = { workspace = true }
 reth-arbitrum-payload = { workspace = true }
 reth-arbitrum-primitives = { workspace = true }
 alloy-rlp = { workspace = true }
+alloy-primitives = { workspace = true }

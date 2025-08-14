@@ -1,5 +1,3 @@
-use async_trait::async_trait;
-
 pub trait Batch {
     fn put(&mut self, key: &[u8], value: &[u8]) -> Result<(), anyhow::Error>;
     fn delete(&mut self, key: &[u8]) -> Result<(), anyhow::Error>;

@@ -36,7 +36,7 @@ impl EthSequencerInbox {
     }
 
     fn encode_u256(v: U256) -> [u8; 32] {
-        v.to_be_bytes()
+        v.to_be_bytes::<32>()
     }
 
     fn decode_b256_word(word: &[u8]) -> anyhow::Result<B256> {
@@ -91,10 +91,10 @@ impl SequencerInbox for EthSequencerInbox {
     }
 
     async fn lookup_batches_in_range(&self, from_block: u64, to_block: u64) -> anyhow::Result<Vec<SequencerInboxBatch>> {
-        let topic0 = B256::from_slice(&keccak256(
+        let topic0: B256 = keccak256(
             "SequencerBatchDelivered(uint256,bytes32,bytes32,bytes32,uint256,(uint64,uint64,uint64,uint64),uint8,uint8,uint8)"
                 .as_bytes(),
-        ));
+        );
         let filter = json!({
             "fromBlock": format!("0x{:x}", from_block),
             "toBlock": format!("0x{:x}", to_block),
@@ -160,7 +160,7 @@ impl SequencerInbox for EthSequencerInbox {
         block_number: u64,
         seq_num: u64,
     ) -> anyhow::Result<(Vec<u8>, B256, Vec<u64>)> {
-        let topic0 = B256::from_slice(&keccak256("SequencerBatchData(uint64,bytes)".as_bytes()));
+        let topic0: B256 = keccak256("SequencerBatchData(uint64,bytes)".as_bytes());
         let mut topic1_bytes = [0u8; 32];
         topic1_bytes[24..32].copy_from_slice(&seq_num.to_be_bytes());
         let topic1 = B256::from_slice(&topic1_bytes);
@@ -187,7 +187,11 @@ impl SequencerInbox for EthSequencerInbox {
             anyhow::bail!("short SequencerBatchData payload");
         }
         let batch_bytes = data[64..64 + len].to_vec();
-        let block_hash = lg.block_hash.unwrap_or_default();
+        let block_hash = lg
+            .blockHash
+            .as_deref()
+            .and_then(|h| B256::from_str(h).ok())
+            .unwrap_or_default();
         Ok((batch_bytes, block_hash, Vec::new()))
     }
 }

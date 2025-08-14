@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, B256, U256};
-use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_rlp::{Decodable, Encodable, Header};
 use anyhow::anyhow;
 use std::io::{Cursor, Read};
 
@@ -33,18 +33,19 @@ pub struct L1IncomingMessage {
 
 impl Encodable for L1IncomingMessageHeader {
     fn length(&self) -> usize {
-        let mut s = 0;
-        s += self.kind.length();
-        s += self.poster.length();
-        s += self.block_number.length();
-        s += self.timestamp.length();
+        let mut payload_len = 0;
+        payload_len += self.kind.length();
+        payload_len += self.poster.length();
+        payload_len += self.block_number.length();
+        payload_len += self.timestamp.length();
         if let Some(req) = self.request_id {
-            s += req.length();
+            payload_len += req.length();
         } else {
-            s += 1;
+            payload_len += 1;
         }
-        s += self.l1_base_fee.length();
-        alloy_rlp::list_length(s)
+        payload_len += self.l1_base_fee.length();
+        let header = Header { list: true, payload_length: payload_len };
+        header.length() + payload_len
     }
 
     fn encode(&self, out: &mut dyn bytes::BufMut) {
@@ -52,13 +53,10 @@ impl Encodable for L1IncomingMessageHeader {
             + self.poster.length()
             + self.block_number.length()
             + self.timestamp.length()
-            + if let Some(req) = self.request_id {
-                req.length()
-            } else {
-                1
-            }
+            + if let Some(req) = self.request_id { req.length() } else { 1 }
             + self.l1_base_fee.length();
-        alloy_rlp::encode_list_header(out, content_len);
+        let header = Header { list: true, payload_length: content_len };
+        header.encode(out);
 
         self.kind.encode(out);
         self.poster.encode(out);
@@ -80,18 +78,18 @@ impl Decodable for L1IncomingMessageHeader {
             return Err(alloy_rlp::Error::Custom("expected list for L1IncomingMessageHeader"));
         }
         let mut bytes = &buf[..payload.payload_length];
-        let kind = u8::decode(&mut bytes)?;
-        let poster = Address::decode(&mut bytes)?;
-        let block_number = u64::decode(&mut bytes)?;
-        let timestamp = u64::decode(&mut bytes)?;
+        let kind = <u8 as Decodable>::decode(&mut bytes)?;
+        let poster = <Address as Decodable>::decode(&mut bytes)?;
+        let block_number = <u64 as Decodable>::decode(&mut bytes)?;
+        let timestamp = <u64 as Decodable>::decode(&mut bytes)?;
         let req_peek = *bytes.get(0).ok_or(alloy_rlp::Error::InputTooShort)?;
         let request_id = if req_peek == 0xc0 {
             bytes = &bytes[1..];
             None
         } else {
-            Some(B256::decode(&mut bytes)?)
+            Some(<B256 as Decodable>::decode(&mut bytes)?)
         };
-        let l1_base_fee = U256::decode(&mut bytes)?;
+        let l1_base_fee = <U256 as Decodable>::decode(&mut bytes)?;
         *buf = &buf[payload.payload_length..];
         Ok(Self { kind, poster, block_number, timestamp, request_id, l1_base_fee })
     }
@@ -99,18 +97,20 @@ impl Decodable for L1IncomingMessageHeader {
 
 impl Encodable for L1IncomingMessage {
     fn length(&self) -> usize {
-        let mut s = 0;
-        s += self.header.length();
-        s += self.l2msg.length();
+        let mut payload_len = 0;
+        payload_len += self.header.length();
+        payload_len += self.l2msg.length();
         if let Some(g) = self.batch_gas_cost {
-            s += g.length();
+            payload_len += g.length();
         }
-        alloy_rlp::list_length(s)
+        let header = Header { list: true, payload_length: payload_len };
+        header.length() + payload_len
     }
 
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         let content_len = self.header.length() + self.l2msg.length() + self.batch_gas_cost.map(|g| g.length()).unwrap_or(0);
-        alloy_rlp::encode_list_header(out, content_len);
+        let header = Header { list: true, payload_length: content_len };
+        header.encode(out);
         self.header.encode(out);
         self.l2msg.encode(out);
         if let Some(g) = self.batch_gas_cost {
@@ -126,10 +126,10 @@ impl Decodable for L1IncomingMessage {
             return Err(alloy_rlp::Error::Custom("expected list for L1IncomingMessage"));
         }
         let mut bytes = &buf[..payload.payload_length];
-        let header = L1IncomingMessageHeader::decode(&mut bytes)?;
-        let l2msg = Vec::<u8>::decode(&mut bytes)?;
+        let header = <L1IncomingMessageHeader as Decodable>::decode(&mut bytes)?;
+        let l2msg = <Vec<u8> as Decodable>::decode(&mut bytes)?;
         let batch_gas_cost = if !bytes.is_empty() {
-            Some(u64::decode(&mut bytes)?)
+            Some(<u64 as Decodable>::decode(&mut bytes)?)
         } else {
             None
         };
@@ -193,7 +193,7 @@ pub fn serialize_incoming_l1_message_legacy(msg: &L1IncomingMessage) -> anyhow::
     out.extend_from_slice(&msg.header.block_number.to_be_bytes());
     out.extend_from_slice(&msg.header.timestamp.to_be_bytes());
     out.extend_from_slice(req.as_slice());
-    out.extend_from_slice(&msg.header.l1_base_fee.to_be_bytes());
+    out.extend_from_slice(&msg.header.l1_base_fee.to_be_bytes::<32>());
     out.extend_from_slice(&msg.l2msg);
     Ok(out)
 }

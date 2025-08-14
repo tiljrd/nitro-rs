@@ -107,7 +107,7 @@ impl DbIterator for SledIter {
     }
     fn release(self: Box<Self>) {}
     fn error(&self) -> Option<anyhow::Error> {
-        self.error.clone()
+        self.error.as_ref().map(|e| anyhow::anyhow!("{}", e))
     }
 }
 

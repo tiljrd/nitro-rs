@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 tokio = { workspace = true }
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env"] }
 tracing = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -18,6 +18,7 @@ reth-arbitrum-rpc = { workspace = true }
 reth-arbitrum-payload = { workspace = true }
 reth-arbitrum-primitives = { workspace = true }
 reth-arbitrum-chainspec = { workspace = true }
+alloy-primitives = { workspace = true }
 
 nitro-inbox = { path = "../inbox" }
 nitro-inbox-reader = { path = "../inbox-reader" }

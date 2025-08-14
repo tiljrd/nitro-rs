@@ -44,7 +44,7 @@ impl EthDelayedBridge {
     }
 
     fn encode_u256(v: U256) -> [u8; 32] {
-        v.to_be_bytes()
+        v.to_be_bytes::<32>()
     }
 
     fn decode_u256_word(word: &[u8]) -> anyhow::Result<U256> {
@@ -107,9 +107,8 @@ impl DelayedBridge for EthDelayedBridge {
     where
         F: Fn(u64) -> anyhow::Result<Vec<u8>> + Send + Sync,
     {
-        let message_delivered_topic = B256::from_slice(
-            &keccak256("MessageDelivered(address,address,uint8,uint256,bytes32,bytes32,uint64,bytes32,uint64)".as_bytes()),
-        );
+        let message_delivered_topic: B256 =
+            keccak256("MessageDelivered(address,address,uint8,uint256,bytes32,bytes32,uint64,bytes32,uint64)".as_bytes());
         let filter = json!({
             "fromBlock": format!("0x{:x}", from_block),
             "toBlock": format!("0x{:x}", to_block),
@@ -170,8 +169,8 @@ impl DelayedBridge for EthDelayedBridge {
             return Ok(Vec::new());
         }
 
-        let inbox_msg_delivered = B256::from_slice(&keccak256("InboxMessageDelivered(uint256,bytes)".as_bytes()));
-        let inbox_msg_from_origin = B256::from_slice(&keccak256("InboxMessageDeliveredFromOrigin(uint256)".as_bytes()));
+        let inbox_msg_delivered: B256 = keccak256("InboxMessageDelivered(uint256,bytes)".as_bytes());
+        let inbox_msg_from_origin: B256 = keccak256("InboxMessageDeliveredFromOrigin(uint256)".as_bytes());
 
         let mut data_by_id: HashMap<B256, Vec<u8>> = HashMap::with_capacity(message_ids.len());
         if !inbox_addresses.is_empty() {

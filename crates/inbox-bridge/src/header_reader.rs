@@ -31,7 +31,10 @@ impl HttpHeaderReader {
 #[async_trait]
 impl L1HeaderReader for HttpHeaderReader {
     async fn last_header(&self) -> Result<L1Header> {
-        let hex: String = self.rpc.call("eth_blockNumber", []).await?;
+        let hex: String = self
+            .rpc
+            .call::<String, Vec<serde_json::Value>>("eth_blockNumber", Vec::new())
+            .await?;
         let n = u64::from_str_radix(hex.trim_start_matches("0x"), 16).unwrap_or(0);
         Ok(L1Header { number: n })
     }
@@ -61,12 +64,15 @@ impl L1HeaderReader for HttpHeaderReader {
                     _ = ticker.tick() => {},
                     _ = stop.notified() => break,
                 }
-                match rpc.call::<String, _>("eth_blockNumber", []).await {
+                match rpc
+                    .call::<String, Vec<serde_json::Value>>("eth_blockNumber", Vec::new())
+                    .await
+                {
                     Ok(hex) => {
                         let n = u64::from_str_radix(hex.trim_start_matches("0x"), 16).unwrap_or(0);
                         if n > last {
                             last = n;
-                            let _ = tx.send(L1Header{ number: n }).await;
+                            let _ = tx.send(L1Header { number: n }).await;
                         }
                     }
                     Err(_) => {}

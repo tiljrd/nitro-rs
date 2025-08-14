@@ -21,12 +21,12 @@ impl DelayedInboxMessage {
                 &header.block_number.to_be_bytes(),
                 &header.timestamp.to_be_bytes(),
                 header.request_id.map(|b| b.0.to_vec()).unwrap_or_default().as_slice(),
-                &header.l1_base_fee.to_be_bytes(),
+                &header.l1_base_fee.to_be_bytes::<32>(),
                 &keccak256(&self.message.l2msg).0[..],
             ]
             .concat(),
         );
-        B256::from_slice(keccak256([self.before_inbox_acc.0.to_vec(), h.0.to_vec()].concat()).as_slice())
+        keccak256([self.before_inbox_acc.0.to_vec(), h.0.to_vec()].concat())
     }
 }
 

@@ -4,7 +4,7 @@ use inbox_bridge::traits::{DelayedBridge, SequencerInbox, L1HeaderReader};
 use nitro_inbox::tracker::InboxTracker;
 use nitro_primitives::l1::serialize_incoming_l1_message_legacy;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 
 use tokio::sync::watch;
 use tracing::info;
@@ -43,7 +43,7 @@ pub struct InboxReader<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db
     l1_reader: Arc<dyn L1HeaderReader>,
     first_message_block: u64,
     config: InboxReaderConfigFetcher,
-    caught_up: bool,
+    caught_up: AtomicBool,
     caught_up_tx: watch::Sender<bool>,
     caught_up_rx: watch::Receiver<bool>,
     last_seen_batch_count: AtomicU64,
@@ -67,7 +67,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             l1_reader,
             first_message_block,
             config,
-            caught_up: false,
+            caught_up: AtomicBool::new(false),
             caught_up_tx: tx,
             caught_up_rx: rx,
             last_seen_batch_count: AtomicU64::new(0),
@@ -82,19 +82,12 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
     pub async fn start(&self) -> Result<()> {
         let read_mode = (self.config)().read_mode.clone();
         let mut from = self.get_next_block_to_read().await?;
-        let (mut headers_rx, unsubscribe) = self.l1_reader.subscribe();
+        let (mut headers_rx, _unsubscribe) = self.l1_reader.subscribe().await;
         let mut blocks_to_fetch = {
             let cfg = (self.config)();
             cfg.default_blocks_to_read
         };
         let mut seen_batch_count: u64 = 0;
-        let mut seen_batch_count_stored: u64 = u64::MAX;
-        let mut store_seen = || {
-            if seen_batch_count_stored != seen_batch_count {
-                self.last_seen_batch_count.store(seen_batch_count, Ordering::Relaxed);
-                seen_batch_count_stored = seen_batch_count;
-            }
-        };
         loop {
             let cfg = (self.config)();
             let mut current_height: u64 = 0;
@@ -211,9 +204,9 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                 from = current_height.saturating_add(1);
                 blocks_to_fetch = cfg.default_blocks_to_read;
                 self.last_read_batch_count.store(checking_batch_count, Ordering::Relaxed);
-                store_seen();
-                if !self.caught_up && read_mode == "latest" {
-                    self.caught_up = true;
+                self.last_seen_batch_count.store(seen_batch_count, Ordering::Relaxed);
+                if !self.caught_up.load(Ordering::Relaxed) && read_mode == "latest" {
+                    self.caught_up.store(true, Ordering::Relaxed);
                     let _ = self.caught_up_tx.send(true);
                 }
                 continue;
@@ -254,7 +247,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             }
 
             self.last_read_batch_count.store(checking_batch_count, Ordering::Relaxed);
-            store_seen();
+            self.last_seen_batch_count.store(seen_batch_count, Ordering::Relaxed);
 
             if fetched_any {
                 from = to_block.saturating_add(1);
@@ -269,7 +262,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
         }
         #[allow(unreachable_code)]
         {
-            let _ = unsubscribe;
+            let _ = _unsubscribe;
             Ok(())
         }
     }

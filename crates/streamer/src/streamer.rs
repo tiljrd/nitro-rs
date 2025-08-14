@@ -1,6 +1,6 @@
 use anyhow::Result;
 use alloy_primitives::B256;
-use alloy_rlp::{Decodable, Decoder, Encodable};
+use alloy_rlp::{Decodable, Encodable};
 use nitro_inbox::db::{Batch, Database};
 use nitro_inbox::util::delete_starting_at;
 use nitro_primitives::dbkeys::{
@@ -143,8 +143,9 @@ impl<D: Database> TransactionStreamer<D> {
 
     pub fn message_count(&self) -> Result<u64> {
         let data = self.db.get(MESSAGE_COUNT_KEY)?;
-        let mut dec = Decoder::new(&data);
-        Ok(u64::decode(&mut dec)?)
+        let mut slice = data.as_slice();
+        let count: u64 = u64::decode(&mut slice)?;
+        Ok(count)
     }
     fn store_result(&self, msg_idx: u64, res: &MessageResult, batch: &mut dyn Batch) -> Result<()> {
         let bytes = alloy_rlp::encode(res);
@@ -158,8 +159,8 @@ impl<D: Database> TransactionStreamer<D> {
         let key = db_key(MESSAGE_RESULT_PREFIX, index);
         match self.db.get(&key) {
             Ok(v) => {
-                let mut dec = Decoder::new(&v);
-                let res = MessageResult::decode(&mut dec)?;
+                let mut slice = v.as_slice();
+                let res: MessageResult = MessageResult::decode(&mut slice)?;
                 Ok(Some(res))
             }
             Err(e) if e.to_string().contains("not found") => Ok(None),
@@ -179,8 +180,8 @@ impl<D: Database> TransactionStreamer<D> {
         let key = db_key(BLOCK_HASH_INPUT_FEED_PREFIX, index);
         match self.db.get(&key) {
             Ok(v) => {
-                let mut dec = Decoder::new(&v);
-                let bh: BlockHashDbValue = BlockHashDbValue::decode(&mut dec)?;
+                let mut slice = v.as_slice();
+                let bh: BlockHashDbValue = BlockHashDbValue::decode(&mut slice)?;
                 Ok(bh.block_hash)
             }
             Err(e) if e.to_string().contains("not found") => Ok(None),
@@ -190,8 +191,8 @@ impl<D: Database> TransactionStreamer<D> {
     pub fn get_message(&self, index: u64) -> Result<MessageWithMetadata> {
         let key = db_key(MESSAGE_PREFIX, index);
         let data = self.db.get(&key)?;
-        let mut dec = Decoder::new(&data);
-        Ok(MessageWithMetadata::decode(&mut dec)?)
+        let mut slice = data.as_slice();
+        Ok(MessageWithMetadata::decode(&mut slice)?)
     }
 
     pub fn get_message_with_metadata_and_block_info(&self, index: u64) -> Result<MessageWithMetadataAndBlockInfo> {
