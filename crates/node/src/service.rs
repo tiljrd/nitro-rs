@@ -32,7 +32,9 @@ impl NitroNode {
             return Ok(());
         }
         let addr: SocketAddr = format!("0.0.0.0:{}", port).parse().unwrap();
+        info!("feed server: binding on {}", addr);
         let listener = tokio::net::TcpListener::bind(addr).await?;
+        info!("feed server: listening on {}", addr);
         tokio::spawn(async move {
             loop {
                 let Ok((mut socket, _)) = listener.accept().await else { continue };
