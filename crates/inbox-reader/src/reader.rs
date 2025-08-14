@@ -186,18 +186,29 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                 }
             }
 
-            seen_batch_count = self.sequencer_inbox.get_batch_count(current_height).await.unwrap_or(0);
-            let our_latest_batch = self.tracker.get_batch_count()?;
-            if our_latest_batch < seen_batch_count {
-                missing_sequencer = true;
-            }
-            let checking_batch_count = our_latest_batch.min(seen_batch_count);
-            if checking_batch_count > 0 {
-                let checking_batch_seq = checking_batch_count - 1;
-                let l1_batch_acc = self.sequencer_inbox.get_accumulator(checking_batch_seq, current_height).await?;
-                let db_batch_acc = self.tracker.get_batch_acc(checking_batch_seq)?;
-                if db_batch_acc != l1_batch_acc {
-                    reorging_sequencer = true;
+            let mut checking_batch_count: u64 = 0;
+            let seen_batch_res = self.sequencer_inbox.get_batch_count(current_height).await;
+            match seen_batch_res {
+                Ok(cnt) => {
+                    seen_batch_count = cnt;
+                    let our_latest_batch = self.tracker.get_batch_count()?;
+                    if our_latest_batch < seen_batch_count {
+                        missing_sequencer = true;
+                    }
+                    checking_batch_count = our_latest_batch.min(seen_batch_count);
+                    if checking_batch_count > 0 {
+                        let checking_batch_seq = checking_batch_count - 1;
+                        let l1_batch_acc = self.sequencer_inbox.get_accumulator(checking_batch_seq, current_height).await?;
+                        let db_batch_acc = self.tracker.get_batch_acc(checking_batch_seq)?;
+                        if db_batch_acc != l1_batch_acc {
+                            reorging_sequencer = true;
+                        }
+                    }
+                }
+                Err(_) => {
+                    seen_batch_count = self.tracker.get_batch_count()?;
+                    checking_batch_count = seen_batch_count;
+                    missing_sequencer = true;
                 }
             }
 
