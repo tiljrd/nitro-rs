@@ -4630,7 +4630,9 @@ dependencies = [
  "brotli 3.5.0",
  "inbox-bridge",
  "lru 0.12.5",
+ "nitro-db-sled",
  "nitro-primitives",
+ "tempfile",
  "tracing",
 ]
 
