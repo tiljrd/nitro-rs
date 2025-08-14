@@ -11,6 +11,8 @@ alloy-primitives = { workspace = true }
 alloy-rlp = { workspace = true }
 arb-alloy-util = { workspace = true }
 lru = { workspace = true }
+brotli = "3"
 
 nitro-primitives = { path = "../primitives" }
 inbox-bridge = { path = "../inbox-bridge" }
+nitro-streamer = { path = "../streamer" }

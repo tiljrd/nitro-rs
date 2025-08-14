@@ -1,9 +1,12 @@
 use crate::db::Database;
+use crate::multiplexer::{InboxMultiplexer, InboxBackend};
 use alloy_primitives::B256;
 use alloy_rlp::Decodable;
 use nitro_primitives::dbkeys::*;
 use nitro_primitives::accumulator::hash_after;
 use nitro_primitives::l1::{L1IncomingMessage, parse_incoming_l1_message_legacy, serialize_incoming_l1_message_legacy};
+use nitro_primitives::message::MessageWithMetadataAndBlockInfo;
+use nitro_streamer::streamer::TransactionStreamer;
 use inbox_bridge::types::SequencerInboxBatch;
 use std::sync::{Arc, Mutex};
 
@@ -26,13 +29,15 @@ pub struct BatchMetadata {
 pub struct InboxTracker<D: Database> {
     pub db: Arc<D>,
     pub batch_meta_cache: Mutex<lru::LruCache<u64, BatchMetadata>>,
+    pub tx_streamer: Arc<TransactionStreamer<D>>,
 }
 
 impl<D: Database> InboxTracker<D> {
-    pub fn new(db: Arc<D>) -> Self {
+    pub fn new(db: Arc<D>, tx_streamer: Arc<TransactionStreamer<D>>) -> Self {
         Self {
             db,
             batch_meta_cache: Mutex::new(lru::LruCache::new(std::num::NonZeroUsize::new(1000).unwrap())),
+            tx_streamer,
         }
     }
 
@@ -202,6 +207,34 @@ impl<D: Database> InboxTracker<D> {
             cache.put(seq, meta);
         }
 
+        Ok(())
+    }
+
+    fn build_backend<'a>(&'a self, batches: &'a [SequencerInboxBatch]) -> TrackerBackend<'a, D> {
+        TrackerBackend { inbox: self, batches, batch_idx: 0, pos_within: 0 }
+    }
+
+    pub fn add_sequencer_batches_and_stream(&self, batches: &[SequencerInboxBatch]) -> anyhow::Result<()> {
+        if batches.is_empty() { return Ok(()); }
+        self.add_sequencer_batches(batches)?;
+        let first_seq = batches[0].sequence_number;
+        let prev_meta = if first_seq > 0 {
+            self.get_batch_metadata(first_seq - 1)?
+        } else {
+            BatchMetadata { accumulator: B256::ZERO, message_count: 0, delayed_message_count: 0, parent_chain_block: 0 }
+        };
+        let mut backend = self.build_backend(batches);
+        let mut mux = InboxMultiplexer::new(&mut backend, prev_meta.delayed_message_count);
+        let mut out: Vec<MessageWithMetadataAndBlockInfo> = Vec::new();
+        loop {
+            match mux.pop()? {
+                Some(m) => out.push(m),
+                None => break,
+            }
+        }
+        if !out.is_empty() {
+            self.tx_streamer.add_messages_and_end_batch(prev_meta.message_count, &out, None)?;
+        }
         Ok(())
     }
 
@@ -457,7 +490,44 @@ impl<D: Database> InboxTracker<D> {
 
         Ok(prev_batch_meta.message_count)
     }
+}
 
+struct TrackerBackend<'a, D: Database> {
+    inbox: &'a InboxTracker<D>,
+    batches: &'a [SequencerInboxBatch],
+    batch_idx: usize,
+    pos_within: u64,
+}
 
+impl<'a, D: Database> TrackerBackend<'a, D> {
+    fn current_batch(&self) -> Option<&'a SequencerInboxBatch> {
+        self.batches.get(self.batch_idx)
+    }
+}
 
+impl<'a, D: Database> InboxBackend for TrackerBackend<'a, D> {
+    fn peek_sequencer_inbox(&mut self) -> anyhow::Result<(Vec<u8>, Option<B256>)> {
+        let b = self.current_batch().ok_or_else(|| anyhow::anyhow!("read past end of specified sequencer batches"))?;
+        Ok((b.serialized.clone(), Some(b.block_hash)))
+    }
+    fn get_sequencer_inbox_position(&self) -> u64 {
+        self.current_batch().map(|b| b.sequence_number).unwrap_or(0)
+    }
+    fn advance_sequencer_inbox(&mut self) {
+        if self.batch_idx < self.batches.len() { self.batch_idx += 1; }
+    }
+    fn get_position_within_message(&self) -> u64 { self.pos_within }
+    fn set_position_within_message(&mut self, pos: u64) { self.pos_within = pos; }
+    fn read_delayed_inbox(&self, seqnum: u64) -> anyhow::Result<L1IncomingMessage> {
+        self.inbox.get_delayed_message(seqnum)
+    }
+}
+
+impl<'a, D: Database> InboxBackend for &mut TrackerBackend<'a, D> {
+    fn peek_sequencer_inbox(&mut self) -> anyhow::Result<(Vec<u8>, Option<B256>)> { (*self).peek_sequencer_inbox() }
+    fn get_sequencer_inbox_position(&self) -> u64 { (*self).get_sequencer_inbox_position() }
+    fn advance_sequencer_inbox(&mut self) { (*self).advance_sequencer_inbox() }
+    fn get_position_within_message(&self) -> u64 { (*self).get_position_within_message() }
+    fn set_position_within_message(&mut self, pos: u64) { (*self).set_position_within_message(pos) }
+    fn read_delayed_inbox(&self, seqnum: u64) -> anyhow::Result<L1IncomingMessage> { (*self).read_delayed_inbox(seqnum) }
 }
