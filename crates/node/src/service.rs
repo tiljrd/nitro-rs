@@ -249,7 +249,10 @@ impl NitroNode {
                 let tracker = tracker.clone();
                 std::sync::Arc::new(move || tracker.get_delayed_count().unwrap_or(0))
             };
-            let poster = nitro_batch_poster::poster::BatchPoster::new(poster_cfg).with_delayed_count_fn(delayed_fn);
+            let segment_src = Arc::new(crate::segment_source::NodeSegmentSource::new(streamer_impl.clone(), 512 * 1024));
+            let poster = nitro_batch_poster::poster::BatchPoster::new(poster_cfg)
+                .with_delayed_count_fn(delayed_fn)
+                .with_segment_source(segment_src);
             Some(tokio::spawn(async move { let _ = poster.start().await; }))
         } else { None };
 
