@@ -1,6 +1,6 @@
 use anyhow::Result;
 use alloy_primitives::B256;
-use alloy_rlp::{Decoder, Encodable};
+use alloy_rlp::{Decodable, Decoder, Encodable};
 use nitro_inbox::db::{Batch, Database};
 use nitro_inbox::util::delete_starting_at;
 use nitro_primitives::dbkeys::{
@@ -8,7 +8,7 @@ use nitro_primitives::dbkeys::{
     MESSAGE_COUNT_KEY, MESSAGE_PREFIX, MESSAGE_RESULT_PREFIX,
     MISSING_BLOCK_METADATA_INPUT_FEED_PREFIX,
 };
-use nitro_primitives::message::{BlockHashDbValue, MessageResult, MessageWithMetadataAndBlockInfo};
+use nitro_primitives::message::{BlockHashDbValue, MessageResult, MessageWithMetadata, MessageWithMetadataAndBlockInfo};
 use std::sync::Arc;
 use tracing::info;
 
@@ -165,6 +165,8 @@ impl<D: Database> TransactionStreamer<D> {
             Err(e) if e.to_string().contains("not found") => Ok(None),
             Err(e) => Err(e),
         }
+    }
+
     pub fn block_metadata_at_message_index(&self, index: u64) -> Result<Option<Vec<u8>>> {
         let key = db_key(BLOCK_METADATA_INPUT_FEED_PREFIX, index);
         match self.db.get(&key) {
@@ -185,6 +187,24 @@ impl<D: Database> TransactionStreamer<D> {
             Err(e) => Err(e),
         }
     }
+    pub fn get_message(&self, index: u64) -> Result<MessageWithMetadata> {
+        let key = db_key(MESSAGE_PREFIX, index);
+        let data = self.db.get(&key)?;
+        let mut dec = Decoder::new(&data);
+        Ok(MessageWithMetadata::decode(&mut dec)?)
+    }
+
+    pub fn get_message_with_metadata_and_block_info(&self, index: u64) -> Result<MessageWithMetadataAndBlockInfo> {
+        let message_with_meta = self.get_message(index)?;
+        let block_hash = self.block_hash_at_message_index(index)?;
+        let block_metadata = self.block_metadata_at_message_index(index)?;
+        Ok(MessageWithMetadataAndBlockInfo {
+            message_with_meta,
+            block_hash,
+            block_metadata,
+        })
+    }
+
 
 
     }
