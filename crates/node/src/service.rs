@@ -198,6 +198,7 @@ impl NitroNode {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
+        let _ = nitro_rpc::register_backend(tracker.clone(), streamer_impl.clone());
 
         let inbox_reader = nitro_inbox_reader::reader::InboxReader::new(
             tracker.clone(),

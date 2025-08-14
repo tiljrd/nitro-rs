@@ -8,4 +8,9 @@ license = "MIT OR Apache-2.0"
 anyhow = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+alloy-primitives = { workspace = true }
+nitro-inbox = { path = "../inbox" }
+nitro-streamer = { path = "../streamer" }
 reth-arbitrum-rpc = { workspace = true }
