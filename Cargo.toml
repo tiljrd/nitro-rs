@@ -1,0 +1,58 @@
+[workspace]
+members = [
+    "crates/node",
+    "crates/inbox",
+    "crates/inbox-reader",
+    "crates/streamer",
+    "crates/batch-poster",
+    "crates/validator",
+    "crates/rpc",
+    "crates/primitives",
+    "bin/arb-nitro-rs",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.1"
+license = "MIT OR Apache-2.0"
+authors = ["Til Jordan & contributors"]
+
+[workspace.dependencies]
+# Arbitrum primitives
+arb-alloy-consensus = { package = "arb-alloy-consensus", path = "../arb-alloy/crates/consensus", version = "0.1.1" }
+arb-alloy-predeploys = { package = "arb-alloy-predeploys", path = "../arb-alloy/crates/predeploys", version = "0.1.1" }
+arb-alloy-util = { package = "arb-alloy-util", path = "../arb-alloy/crates/util", version = "0.1.1" }
+
+# Reth arbitrum integration crates
+reth-arbitrum-evm = { path = "../reth/crates/arbitrum/evm" }
+reth-arbitrum-node = { path = "../reth/crates/arbitrum/node" }
+reth-arbitrum-rpc = { path = "../reth/crates/arbitrum/rpc" }
+reth-arbitrum-payload = { path = "../reth/crates/arbitrum/payload" }
+reth-arbitrum-primitives = { path = "../reth/crates/arbitrum/primitives" }
+reth-arbitrum-chainspec = { path = "../reth/crates/arbitrum/chainspec" }
+
+# Reth core deps
+reth-node-core = { path = "../reth/crates/node/core" }
+reth-node-builder = { path = "../reth/crates/node/builder" }
+reth-rpc-api = { path = "../reth/crates/rpc/rpc-api" }
+
+# Alloy/Ethereum basics
+alloy-primitives = "0.8"
+alloy-consensus = "0.8"
+alloy-rlp = "0.3"
+alloy-eips = "0.9"
+
+# Async/runtime
+tokio = { version = "1.38", features = ["full"] }
+async-trait = "0.1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Misc
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+anyhow = "1"

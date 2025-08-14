@@ -1,0 +1,28 @@
+[package]
+name = "nitro-node"
+version = "0.1.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+tokio = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+reth-arbitrum-node = { workspace = true }
+reth-arbitrum-evm = { workspace = true }
+reth-arbitrum-rpc = { workspace = true }
+reth-arbitrum-payload = { workspace = true }
+reth-arbitrum-primitives = { workspace = true }
+reth-arbitrum-chainspec = { workspace = true }
+
+nitro-inbox = { path = "../inbox" }
+nitro-inbox-reader = { path = "../inbox-reader" }
+nitro-streamer = { path = "../streamer" }
+nitro-batch-poster = { path = "../batch-poster" }
+nitro-validator = { path = "../validator" }
+nitro-rpc = { path = "../rpc" }
+nitro-primitives = { path = "../primitives" }
