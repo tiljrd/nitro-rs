@@ -39,6 +39,11 @@ use std::sync::{Arc, Mutex};
 
 type DelayedCountFn = Arc<dyn Fn() -> u64 + Send + Sync>;
 
+pub trait SegmentSource: Send + Sync {
+    fn max_bytes(&self) -> usize { 0 }
+    fn next_segments(&self, _max_bytes: usize) -> Vec<Vec<u8>> { Vec::new() }
+}
+
 #[derive(Clone, Default)]
 pub struct BatchPosterConfig {
     pub enabled: bool,
@@ -52,16 +57,22 @@ pub struct BatchPosterConfig {
 pub struct BatchPoster {
     cfg: BatchPosterConfig,
     delayed_count_fn: Option<DelayedCountFn>,
+    segment_source: Option<Arc<dyn SegmentSource>>,
     last_after_delayed: Mutex<Option<u64>>,
 }
 
 impl BatchPoster {
     pub fn new(cfg: BatchPosterConfig) -> Self {
-        Self { cfg, delayed_count_fn: None, last_after_delayed: Mutex::new(None) }
+        Self { cfg, delayed_count_fn: None, segment_source: None, last_after_delayed: Mutex::new(None) }
     }
 
     pub fn with_delayed_count_fn(mut self, f: DelayedCountFn) -> Self {
         self.delayed_count_fn = Some(f);
+        self
+    }
+
+    pub fn with_segment_source(mut self, s: Arc<dyn SegmentSource>) -> Self {
+        self.segment_source = Some(s);
         self
     }
 
@@ -80,7 +91,13 @@ impl BatchPoster {
 
         let bounds = self.resolve_l1_bounds().await?;
 
-        let segments: Vec<Vec<u8>> = Vec::new();
+        let segments: Vec<Vec<u8>> = match &self.segment_source {
+            Some(src) => {
+                let max = src.max_bytes();
+                src.next_segments(max)
+            }
+            None => Vec::new(),
+        };
 
         let mut out: Vec<u8> = Vec::with_capacity(40 + 128);
         out.extend_from_slice(&bounds.min_ts.to_be_bytes());
