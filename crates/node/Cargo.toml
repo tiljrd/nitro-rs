@@ -29,6 +29,10 @@ reth-payload-builder = { workspace = true }
 reth-payload-primitives = { workspace = true }
 reth-tasks = { workspace = true }
 
+# Base reth chainspec crate and alloy chain ids
+reth-chainspec = { workspace = true }
+alloy-chains = { workspace = true }
+
 # Use reth's engine primitives for PayloadAttributes to avoid version conflicts.
 reth-ethereum-engine-primitives = { workspace = true }
 
