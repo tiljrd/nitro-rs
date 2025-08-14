@@ -51,12 +51,32 @@ impl BatchPoster {
             }
             *guard = Some(after_delayed);
         }
-        let mut out: Vec<u8> = Vec::with_capacity(40 + 64);
-        out.extend_from_slice(&0u64.to_be_bytes());
-        out.extend_from_slice(&u64::MAX.to_be_bytes());
-        out.extend_from_slice(&0u64.to_be_bytes());
-        out.extend_from_slice(&u64::MAX.to_be_bytes());
-        out.extend_from_slice(&after_delayed.to_be_bytes());
+
+        let segments: Vec<Vec<u8>> = Vec::new();
+
+        let mut out: Vec<u8> = Vec::with_capacity(40 + 128);
+        out.extend_from_slice(&0u64.to_be_bytes());        // min ts
+        out.extend_from_slice(&u64::MAX.to_be_bytes());    // max ts
+        out.extend_from_slice(&0u64.to_be_bytes());        // min l1 block
+        out.extend_from_slice(&u64::MAX.to_be_bytes());    // max l1 block
+        out.extend_from_slice(&after_delayed.to_be_bytes());// after_delayed_messages
+
+        let mut concatenated: Vec<u8> = Vec::new();
+        for seg in segments {
+            let enc = alloy_rlp::encode(&seg);
+            concatenated.extend_from_slice(&enc);
+        }
+        let mut payload: Vec<u8> = Vec::new();
+        payload.push(0x01);
+        let mut comp = Vec::new();
+        {
+            let mut params = brotli::enc::BrotliEncoderParams::default();
+            params.quality = 6;
+            brotli::BrotliCompress(&mut concatenated.as_slice(), &mut comp, &params)?;
+        }
+        payload.extend_from_slice(&comp);
+
+        out.extend_from_slice(&payload);
         Ok(Some(out))
     }
 
@@ -125,9 +145,8 @@ impl PosterService for BatchPoster {
         loop {
             tick.tick().await;
             if let Some(bytes) = self.build_batch_bytes().await? {
-                let comp = self.brotli_compress(&bytes)?;
-                let _ = self.estimate_l1_cost(comp.len(), 0);
-                let _ = self.post_to_l1(&comp).await?;
+                let _ = self.estimate_l1_cost(bytes.len(), 0);
+                let _ = self.post_to_l1(&bytes).await?;
             }
         }
     }
