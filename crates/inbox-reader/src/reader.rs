@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use inbox_bridge::traits::{DelayedBridge, SequencerInbox};
+use inbox_bridge::traits::{DelayedBridge, SequencerInbox, L1HeaderReader};
 use nitro_inbox::tracker::InboxTracker;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -37,6 +37,7 @@ pub struct InboxReader<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db
     tracker: Arc<InboxTracker<D>>,
     delayed_bridge: Arc<B1>,
     sequencer_inbox: Arc<B2>,
+    l1_reader: Arc<dyn L1HeaderReader>,
     first_message_block: u64,
     config: InboxReaderConfigFetcher,
     caught_up_tx: watch::Sender<bool>,
@@ -48,6 +49,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
         tracker: Arc<InboxTracker<D>>,
         delayed_bridge: Arc<B1>,
         sequencer_inbox: Arc<B2>,
+        l1_reader: Arc<dyn L1HeaderReader>,
         first_message_block: u64,
         config: InboxReaderConfigFetcher,
     ) -> Self {
@@ -56,6 +58,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             tracker,
             delayed_bridge,
             sequencer_inbox,
+            l1_reader,
             first_message_block,
             config,
             caught_up_tx: tx,
@@ -72,6 +75,32 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
         Ok(())
     }
 }
+impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxReader<B1, B2, D> {
+    fn recent_parent_chain_block_to_msg(&self, parent_chain_block: u64) -> Result<u64> {
+        let mut batch = self.tracker.get_batch_count()?;
+        loop {
+            if batch == 0 {
+                return Ok(0);
+            }
+            batch -= 1;
+            let meta = self.tracker.get_batch_metadata(batch)?;
+            if meta.parent_chain_block <= parent_chain_block {
+                return Ok(meta.message_count);
+            }
+        }
+    }
+
+    pub async fn get_safe_msg_count(&self) -> Result<u64> {
+        let l1block = self.l1_reader.latest_safe_block_nr().await?;
+        self.recent_parent_chain_block_to_msg(l1block)
+    }
+
+    pub async fn get_finalized_msg_count(&self) -> Result<u64> {
+        let l1block = self.l1_reader.latest_finalized_block_nr().await?;
+        self.recent_parent_chain_block_to_msg(l1block)
+    }
+}
+
 
 impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxReader<B1, B2, D> {
     async fn get_next_block_to_read(&self) -> Result<u64> {
@@ -82,6 +111,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
         let (_, parent_block) = self
             .tracker
             .get_delayed_message_accumulator_and_parent_chain_block_number(delayed_count - 1)?;
-        Ok(parent_block)
+        let msg_block = parent_block.max(self.first_message_block);
+        Ok(msg_block)
     }
 }
