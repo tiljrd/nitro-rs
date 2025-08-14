@@ -200,7 +200,8 @@ impl NitroNode {
         } else { None };
 
         let validator_task = if self.args.validator_enable {
-            let validator = nitro_validator::Validator::new();
+            let validator = nitro_validator::Validator::new()
+                .with_config(nitro_validator::ValidatorConfig { enabled: true });
             Some(tokio::spawn(async move { let _ = validator.start().await; }))
         } else { None };
 
