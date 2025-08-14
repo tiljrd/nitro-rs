@@ -108,10 +108,75 @@ impl<D: Database> InboxTracker<D> {
         Ok(u64::decode(&mut dec)?)
     }
 
-    pub fn set_delayed_count_reorg_and_write_batch(&self, new_count: u64) -> anyhow::Result<()> {
+    pub fn set_delayed_count_reorg_and_write_batch(
+        &self,
+        first_new_delayed_message_pos: u64,
+        new_delayed_count: u64,
+        can_reorg_batches: bool,
+    ) -> anyhow::Result<()> {
+        if first_new_delayed_message_pos > new_delayed_count {
+            anyhow::bail!(
+                "firstNewDelayedMessagePos {} is after newDelayedCount {}",
+                first_new_delayed_message_pos,
+                new_delayed_count
+            );
+        }
         let mut batch = self.db.new_batch();
-        let enc = alloy_rlp::encode(&new_count);
+
+        crate::util::delete_starting_at(
+            self.db.as_ref(),
+            batch.as_mut(),
+            RLP_DELAYED_MESSAGE_PREFIX,
+            &uint64_to_key(new_delayed_count),
+        )?;
+        crate::util::delete_starting_at(
+            self.db.as_ref(),
+            batch.as_mut(),
+            PARENT_CHAIN_BLOCK_NUMBER_PREFIX,
+            &uint64_to_key(new_delayed_count),
+        )?;
+        crate::util::delete_starting_at(
+            self.db.as_ref(),
+            batch.as_mut(),
+            LEGACY_DELAYED_MESSAGE_PREFIX,
+            &uint64_to_key(new_delayed_count),
+        )?;
+
+        let enc = alloy_rlp::encode(&new_delayed_count);
         batch.put(DELAYED_MESSAGE_COUNT_KEY, &enc)?;
+
+        let mut seq_iter = self
+            .db
+            .new_iterator(DELAYED_SEQUENCED_PREFIX, &uint64_to_key(first_new_delayed_message_pos + 1));
+        let mut reorg_seq_batches_to_count: Option<u64> = None;
+        while seq_iter.next() {
+            let val = seq_iter.value();
+            let mut dec = alloy_rlp::Decoder::new(val);
+            let batch_seq_num: u64 = u64::decode(&mut dec)?;
+            if !can_reorg_batches {
+                anyhow::bail!(
+                    "reorging of sequencer batch number {} via delayed messages reorg to count {} disabled",
+                    batch_seq_num,
+                    new_delayed_count
+                );
+            }
+            let key = seq_iter.key().to_vec();
+            batch.delete(&key)?;
+            if reorg_seq_batches_to_count.is_none() {
+                reorg_seq_batches_to_count = Some(batch_seq_num);
+            }
+        }
+        if let Some(err) = seq_iter.error() {
+            return Err(err);
+        }
+        seq_iter.release();
+
+        if let Some(count) = reorg_seq_batches_to_count {
+            let count_enc = alloy_rlp::encode(&count);
+            batch.put(SEQUENCER_BATCH_COUNT_KEY, &count_enc)?;
+            self.delete_batch_metadata_starting_at(count)?;
+        }
+
         batch.write()?;
         Ok(())
     }
