@@ -29,6 +29,21 @@ impl EthSequencerInbox {
         let rpc = Arc::new(RpcClient::new(rpc_url.to_string()));
         Ok(Self { rpc, inbox_addr })
     }
+    async fn get_bridge_addr_at_block(&self, block_number: u64) -> anyhow::Result<Address> {
+        let mut data = Vec::with_capacity(4);
+        data.extend_from_slice(&Self::encode_selector("bridge()"));
+        let to_hex = format!("{:#x}", self.inbox_addr);
+        let block_tag = format!("0x{:x}", block_number);
+        let res_hex: String = self.rpc.call("eth_call", json!([{
+            "to": to_hex,
+            "data": format!("0x{}", hex::encode(data)),
+        }, block_tag])).await?;
+        let res = hex::decode(res_hex.trim_start_matches("0x"))?;
+        if res.len() < 32 {
+            anyhow::bail!("short returndata for bridge()");
+        }
+        Ok(Address::from_slice(&res[12..32]))
+    }
 
     fn encode_selector(sig: &str) -> [u8; 4] {
         let h = keccak256(sig.as_bytes());
@@ -57,9 +72,10 @@ impl EthSequencerInbox {
 #[async_trait]
 impl SequencerInbox for EthSequencerInbox {
     async fn get_batch_count(&self, block_number: u64) -> anyhow::Result<u64> {
+        let bridge_addr = self.get_bridge_addr_at_block(block_number).await?;
         let mut data = Vec::with_capacity(4);
-        data.extend_from_slice(&Self::encode_selector("batchCount()"));
-        let to_hex = format!("{:#x}", self.inbox_addr);
+        data.extend_from_slice(&Self::encode_selector("sequencerMessageCount()"));
+        let to_hex = format!("{:#x}", bridge_addr);
         let block_tag = format!("0x{:x}", block_number);
         let res_hex: String = self.rpc.call("eth_call", json!([{
             "to": to_hex,
@@ -67,17 +83,18 @@ impl SequencerInbox for EthSequencerInbox {
         }, block_tag])).await?;
         let res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
-            anyhow::bail!("short returndata for batchCount")
+            anyhow::bail!("short returndata for sequencerMessageCount")
         }
         let count = Self::decode_u256_word(&res[0..32])?;
         Ok(count.try_into().map_err(|_| anyhow::anyhow!("count overflow"))?)
     }
 
     async fn get_accumulator(&self, seq_num: u64, block_number: u64) -> anyhow::Result<B256> {
+        let bridge_addr = self.get_bridge_addr_at_block(block_number).await?;
         let mut data = Vec::with_capacity(4 + 32);
-        data.extend_from_slice(&Self::encode_selector("inboxAccs(uint256)"));
+        data.extend_from_slice(&Self::encode_selector("sequencerInboxAccs(uint256)"));
         data.extend_from_slice(&Self::encode_u256(U256::from(seq_num)));
-        let to_hex = format!("{:#x}", self.inbox_addr);
+        let to_hex = format!("{:#x}", bridge_addr);
         let block_tag = format!("0x{:x}", block_number);
         let res_hex: String = self.rpc.call("eth_call", json!([{
             "to": to_hex,
@@ -85,7 +102,7 @@ impl SequencerInbox for EthSequencerInbox {
         }, block_tag])).await?;
         let res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
-            anyhow::bail!("short returndata for inboxAccs")
+            anyhow::bail!("short returndata for sequencerInboxAccs")
         }
         Ok(Self::decode_b256_word(&res[0..32])?)
     }
