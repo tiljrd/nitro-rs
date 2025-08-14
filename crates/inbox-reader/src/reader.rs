@@ -87,6 +87,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             let cfg = (self.config)();
             cfg.default_blocks_to_read
         };
+        info!("inbox_reader: starting loop with read_mode={}", read_mode);
         let mut seen_batch_count: u64 = 0;
         loop {
             let cfg = (self.config)();
@@ -123,6 +124,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                     }
                 }
             } else {
+                info!("inbox_reader: latest header number={}", current_height);
                 let latest = self.l1_reader.last_header().await?;
                 current_height = latest.number;
                 let needed_block_advance = cfg.delay_blocks + cfg.min_blocks_to_read.saturating_sub(1);
@@ -147,6 +149,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                         }
                     }
                 }
+                info!("inbox_reader: adjusted current_height after delay={} => {}", cfg.delay_blocks, current_height);
                 if cfg.delay_blocks > 0 {
                     if current_height >= cfg.delay_blocks {
                         current_height -= cfg.delay_blocks;
@@ -161,6 +164,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                     from = current_height;
                 }
             }
+            info!("inbox_reader: compute window from={} current_height={} blocks_to_fetch={}", from, current_height, blocks_to_fetch);
 
             let mut reorging_delayed = false;
             let mut reorging_sequencer = false;
@@ -184,6 +188,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                         reorging_delayed = true;
                     }
                 }
+                info!("inbox_reader: delayed our_latest={} l1_count={} reorging={} missing={}", our_latest_delayed, checking_delayed_count, reorging_delayed, missing_delayed);
             }
 
             let mut checking_batch_count: u64 = 0;
@@ -202,12 +207,15 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                         let db_batch_acc = self.tracker.get_batch_acc(checking_batch_seq)?;
                         if db_batch_acc != l1_batch_acc {
                             reorging_sequencer = true;
+                            info!("inbox_reader: sequencer reorg detected at seq={}", checking_batch_seq);
                         }
                     }
+                    info!("inbox_reader: sequencer our_latest={} l1_seen={} checking={}", our_latest_batch, seen_batch_count, checking_batch_count);
                 }
                 Err(_) => {
                     seen_batch_count = self.tracker.get_batch_count()?;
                     checking_batch_count = seen_batch_count;
+                    info!("inbox_reader: sequencer get_batch_count failed; using db count {}", seen_batch_count);
                     missing_sequencer = true;
                 }
             }
@@ -215,6 +223,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             if !missing_delayed && !reorging_delayed && !missing_sequencer && !reorging_sequencer {
                 from = current_height.saturating_add(1);
                 blocks_to_fetch = cfg.default_blocks_to_read;
+                info!("inbox_reader: nothing missing; advancing from -> {}", from);
                 self.last_read_batch_count.store(checking_batch_count, Ordering::Relaxed);
                 self.last_seen_batch_count.store(seen_batch_count, Ordering::Relaxed);
                 if !self.caught_up.load(Ordering::Relaxed) && read_mode == "latest" {
@@ -227,6 +236,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             let to_block = from
                 .saturating_add(blocks_to_fetch)
                 .min(current_height);
+            info!("inbox_reader: to_block computed {}", to_block);
             let mut fetched_any = false;
 
             if missing_delayed || reorging_delayed {
@@ -236,11 +246,12 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                     .await?;
                 if !delayed.is_empty() {
                     let mut tuples: Vec<(u64, alloy_primitives::B256, Vec<u8>)> = Vec::with_capacity(delayed.len());
-                    for m in delayed {
+                    for m in &delayed {
                         let bytes = serialize_incoming_l1_message_legacy(&m.message)?;
                         tuples.push((m.seq_num, m.before_inbox_acc, bytes));
                     }
                     self.tracker.add_delayed_messages(&tuples, None)?;
+                    info!("inbox_reader: fetched {} delayed messages", delayed.len());
                     fetched_any = true;
                 }
             }
@@ -253,6 +264,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                     .unwrap_or_default();
                 if !batches.is_empty() {
                     self.tracker.add_sequencer_batches_and_stream(&batches)?;
+                    info!("inbox_reader: fetched {} sequencer batches", batches.len());
                     fetched_any = true;
                     seen_batch_count = seen_batch_count.max(batches.last().unwrap().sequence_number + 1);
                 }

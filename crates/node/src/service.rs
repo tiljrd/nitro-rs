@@ -14,6 +14,7 @@ use crate::config::NodeArgs;
 
 use reth_node_core::node_config::NodeConfig;
 use reth_node_core::args::RpcServerArgs;
+use reth_node_core::args::NetworkArgs;
 use reth_node_builder::NodeBuilder;
 use reth_arbitrum_node::{ArbNode, args::RollupArgs};
 use reth_tasks::TaskManager;
@@ -144,6 +145,7 @@ impl NitroNode {
         }
 
         let mut rpc = RpcServerArgs::default().with_http().with_ws();
+        rpc.disable_auth_server = true;
         let http_ip: IpAddr = rpc_host_cfg.parse().unwrap_or(Ipv4Addr::UNSPECIFIED.into());
         rpc.http_addr = http_ip;
         rpc.http_port = rpc_http_port_cfg;
@@ -157,7 +159,10 @@ impl NitroNode {
         };
         let mut spec = reth_chainspec::ChainSpec::default();
         spec.chain = Chain::from(chain_id);
-        let arb_cfg = NodeConfig::new(Arc::new(spec)).with_rpc(rpc);
+        let net = NetworkArgs::default().with_unused_ports();
+        let arb_cfg = NodeConfig::new(Arc::new(spec))
+            .with_network(net)
+            .with_rpc(rpc);
         let builder = NodeBuilder::new(arb_cfg);
         let task_manager = TaskManager::current();
         let task_executor = task_manager.executor();
