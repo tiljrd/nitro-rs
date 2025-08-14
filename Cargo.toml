@@ -42,6 +42,7 @@ reth-payload-builder = { path = "../reth/crates/payload/builder" }
 reth-payload-primitives = { path = "../reth/crates/payload/primitives" }
 reth-rpc-api = { path = "../reth/crates/rpc/rpc-api" }
 reth-tasks = { path = "../reth/crates/tasks" }
+reth-ethereum-engine-primitives = { path = "../reth/crates/ethereum/engine-primitives" }
 
 # Alloy/Ethereum basics
 alloy-primitives = { version = "1.3", features = ["rlp"] }
