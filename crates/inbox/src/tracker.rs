@@ -522,12 +522,3 @@ impl<'a, D: Database> InboxBackend for TrackerBackend<'a, D> {
         self.inbox.get_delayed_message(seqnum)
     }
 }
-
-impl<'a, D: Database> InboxBackend for &mut TrackerBackend<'a, D> {
-    fn peek_sequencer_inbox(&mut self) -> anyhow::Result<(Vec<u8>, Option<B256>)> { (*self).peek_sequencer_inbox() }
-    fn get_sequencer_inbox_position(&self) -> u64 { (*self).get_sequencer_inbox_position() }
-    fn advance_sequencer_inbox(&mut self) { (*self).advance_sequencer_inbox() }
-    fn get_position_within_message(&self) -> u64 { (*self).get_position_within_message() }
-    fn set_position_within_message(&mut self, pos: u64) { (*self).set_position_within_message(pos) }
-    fn read_delayed_inbox(&self, seqnum: u64) -> anyhow::Result<L1IncomingMessage> { (*self).read_delayed_inbox(seqnum) }
-}

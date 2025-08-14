@@ -1,9 +1,7 @@
-use alloy_rlp::RlpDecodable;
-use alloy_primitives::{B256, Address, keccak256};
-use crate::db::Database;
+use alloy_rlp::Decodable;
+use alloy_primitives::{B256, Address};
 use nitro_primitives::message::{MessageWithMetadata, MessageWithMetadataAndBlockInfo};
-use nitro_primitives::l1::{L1IncomingMessage, L1IncomingMessageHeader, L1MessageType};
-use crate as nitro_inbox;
+use nitro_primitives::l1::{L1IncomingMessage, L1IncomingMessageHeader};
 use std::io::Read;
 
 const BATCH_SEGMENT_KIND_L2_MESSAGE: u8 = 0;
@@ -222,14 +220,14 @@ impl<B: InboxBackend> InboxMultiplexer<B> {
                 payload = decompressed;
             }
             let l1_header = L1IncomingMessageHeader {
-                kind: L1MessageType::L2Message as u8,
+                kind: 3,
                 poster: Address::ZERO, // BatchPosterAddress; filled by execution hooks
                 block_number: block_number.clamp(seq.min_l1_block, seq.max_l1_block),
                 timestamp: timestamp.clamp(seq.min_timestamp, seq.max_timestamp),
                 request_id: None,
                 l1_base_fee: alloy_primitives::U256::ZERO,
             };
-            let msg = L1IncomingMessage { header: l1_header, l2msg: payload };
+            let msg = L1IncomingMessage { header: l1_header, l2msg: payload, batch_gas_cost: None };
             let with_meta = MessageWithMetadata { message: msg, delayed_messages_read: self.delayed_messages_read };
             let out = MessageWithMetadataAndBlockInfo {
                 message_with_meta: with_meta,
@@ -249,6 +247,7 @@ impl<B: InboxBackend> InboxMultiplexer<B> {
                         l1_base_fee: alloy_primitives::U256::ZERO,
                     },
                     l2msg: vec![],
+                    batch_gas_cost: None,
                 };
                 let with_meta = MessageWithMetadata { message: invalid, delayed_messages_read: seq.after_delayed_messages };
                 let out = MessageWithMetadataAndBlockInfo {
