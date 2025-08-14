@@ -4716,9 +4716,11 @@ dependencies = [
  "alloy-rlp",
  "anyhow",
  "async-trait",
+ "nitro-db-sled",
  "nitro-inbox",
  "nitro-primitives",
  "serde",
+ "tempfile",
  "tokio",
  "tracing",
 ]

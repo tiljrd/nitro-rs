@@ -14,3 +14,7 @@ nitro-primitives = { path = "../primitives" }
 alloy-rlp = { workspace = true }
 alloy-primitives = { workspace = true }
 async-trait = "0.1"
+[dev-dependencies]
+tempfile = "3"
+nitro-db-sled = { path = "../db-sled" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
