@@ -10,4 +10,7 @@ pub struct NodeArgs {
 
     #[arg(long, default_value_t = false)]
     pub sequencer: bool,
+    #[arg(long = "conf.file")]
+    pub conf_file: Option<String>,
+
 }

@@ -24,4 +24,7 @@ FROM debian:bookworm-slim
 # Install runtime deps (OpenSSL runtime for libssl.so.3)
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/arb-nitro-rs /usr/local/bin/arb-nitro-rs
+# Provide Nitro-compatible binary names expected by arbitrum-package
+RUN ln -sf /usr/local/bin/arb-nitro-rs /usr/local/bin/nitro
+
 ENTRYPOINT ["/usr/local/bin/arb-nitro-rs"]
