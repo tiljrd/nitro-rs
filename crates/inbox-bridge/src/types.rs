@@ -3,6 +3,7 @@ use nitro_primitives::l1::L1IncomingMessage;
 
 #[derive(Clone, Debug)]
 pub struct DelayedInboxMessage {
+    pub seq_num: u64,
     pub block_hash: B256,
     pub before_inbox_acc: B256,
     pub message: L1IncomingMessage,

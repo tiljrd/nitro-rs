@@ -2,6 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use inbox_bridge::traits::{DelayedBridge, SequencerInbox, L1HeaderReader};
 use nitro_inbox::tracker::InboxTracker;
+use nitro_primitives::l1::serialize_incoming_l1_message_legacy;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -218,13 +219,52 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                 continue;
             }
 
+            let to_block = from
+                .saturating_add(blocks_to_fetch)
+                .min(current_height);
+            let mut fetched_any = false;
+
+            if missing_delayed || reorging_delayed {
+                let delayed = self
+                    .delayed_bridge
+                    .lookup_messages_in_range(from, to_block, |_b| Ok(Vec::new()))
+                    .await?;
+                if !delayed.is_empty() {
+                    let mut tuples: Vec<(u64, alloy_primitives::B256, Vec<u8>)> = Vec::with_capacity(delayed.len());
+                    for m in delayed {
+                        let bytes = serialize_incoming_l1_message_legacy(&m.message)?;
+                        tuples.push((m.seq_num, m.before_inbox_acc, bytes));
+                    }
+                    self.tracker.add_delayed_messages(&tuples, None)?;
+                    fetched_any = true;
+                }
+            }
+
+            if missing_sequencer || reorging_sequencer {
+                let batches = self
+                    .sequencer_inbox
+                    .lookup_batches_in_range(from, to_block)
+                    .await
+                    .unwrap_or_default();
+                if !batches.is_empty() {
+                    self.tracker.add_sequencer_batches(&batches)?;
+                    fetched_any = true;
+                    seen_batch_count = seen_batch_count.max(batches.last().unwrap().sequence_number + 1);
+                }
+            }
+
             self.last_read_batch_count.store(checking_batch_count, Ordering::Relaxed);
             store_seen();
-            if reorging_delayed || reorging_sequencer {
+
+            if fetched_any {
+                from = to_block.saturating_add(1);
+            } else if reorging_delayed || reorging_sequencer {
                 let prev = self.get_prev_block_for_reorg(from, blocks_to_fetch)?;
                 from = prev;
+                blocks_to_fetch = 1;
             } else {
-                from = from.saturating_add(blocks_to_fetch).min(current_height).saturating_add(1);
+                from = to_block.saturating_add(1);
+                blocks_to_fetch = (blocks_to_fetch / 2).max(cfg.min_blocks_to_read);
             }
         }
         #[allow(unreachable_code)]
