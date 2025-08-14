@@ -5,10 +5,36 @@ use tracing::info;
 use alloy_primitives::{Address, B256, U256};
 use arb_alloy_util::l1_pricing::L1PricingState;
 use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_types::BlockNumberOrTag;
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{sol, SolCall};
 use std::str::FromStr;
 use alloy_rpc_types::TransactionRequest;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParentChainBound {
+    Latest,
+    Safe,
+    Finalized,
+    Ignore,
+}
+
+impl ParentChainBound {
+    pub fn parse(s: &str) -> Self {
+        match s.to_ascii_lowercase().as_str() {
+            "safe" => ParentChainBound::Safe,
+            "finalized" => ParentChainBound::Finalized,
+            "ignore" => ParentChainBound::Ignore,
+            _ => ParentChainBound::Latest,
+        }
+    }
+}
+
+struct L1Bounds {
+    min_ts: u64,
+    max_ts: u64,
+    min_block: u64,
+    max_block: u64,
+}
 use std::sync::{Arc, Mutex};
 
 type DelayedCountFn = Arc<dyn Fn() -> u64 + Send + Sync>;
@@ -52,14 +78,16 @@ impl BatchPoster {
             *guard = Some(after_delayed);
         }
 
+        let bounds = self.resolve_l1_bounds().await?;
+
         let segments: Vec<Vec<u8>> = Vec::new();
 
         let mut out: Vec<u8> = Vec::with_capacity(40 + 128);
-        out.extend_from_slice(&0u64.to_be_bytes());        // min ts
-        out.extend_from_slice(&u64::MAX.to_be_bytes());    // max ts
-        out.extend_from_slice(&0u64.to_be_bytes());        // min l1 block
-        out.extend_from_slice(&u64::MAX.to_be_bytes());    // max l1 block
-        out.extend_from_slice(&after_delayed.to_be_bytes());// after_delayed_messages
+        out.extend_from_slice(&bounds.min_ts.to_be_bytes());
+        out.extend_from_slice(&bounds.max_ts.to_be_bytes());
+        out.extend_from_slice(&bounds.min_block.to_be_bytes());
+        out.extend_from_slice(&bounds.max_block.to_be_bytes());
+        out.extend_from_slice(&after_delayed.to_be_bytes());
 
         let mut concatenated: Vec<u8> = Vec::new();
         for seg in segments {
@@ -92,6 +120,33 @@ impl BatchPoster {
         let pricing = L1PricingState { l1_base_fee_wei: base_fee };
         pricing.poster_data_cost_estimate_from_len(brotli_len as u64)
     }
+    async fn resolve_l1_bounds(&self) -> Result<L1Bounds> {
+        let bound = ParentChainBound::parse(&self.cfg.parent_chain_bound);
+        if matches!(bound, ParentChainBound::Ignore) {
+            return Ok(L1Bounds { min_ts: 0, max_ts: u64::MAX, min_block: 0, max_block: u64::MAX });
+        }
+        let provider = ProviderBuilder::new().connect_http(self.cfg.l1_rpc_url.parse()?);
+
+        let tag = match bound {
+            ParentChainBound::Latest => BlockNumberOrTag::Latest,
+            ParentChainBound::Safe => BlockNumberOrTag::Safe,
+            ParentChainBound::Finalized => BlockNumberOrTag::Finalized,
+            ParentChainBound::Ignore => BlockNumberOrTag::Latest,
+        };
+        let block = match provider.get_block_by_number(tag).await {
+            Ok(b) => b,
+            Err(_) => return Ok(L1Bounds { min_ts: 0, max_ts: u64::MAX, min_block: 0, max_block: u64::MAX }),
+        };
+        let Some(block) = block else {
+            return Ok(L1Bounds { min_ts: 0, max_ts: u64::MAX, min_block: 0, max_block: u64::MAX });
+        };
+
+        let max_block = block.number();
+        let max_ts = block.header.inner.timestamp;
+
+        Ok(L1Bounds { min_ts: 0, max_ts, min_block: 0, max_block })
+    }
+
 
     async fn post_to_l1(&self, data: &[u8]) -> Result<B256> {
         let key_hex = match &self.cfg.poster_private_key_hex {
@@ -100,6 +155,7 @@ impl BatchPoster {
         };
         let signer = PrivateKeySigner::from_str(&key_hex)?;
         let provider = ProviderBuilder::new()
+
             .wallet(signer)
             .connect_http(self.cfg.l1_rpc_url.parse()?);
 
