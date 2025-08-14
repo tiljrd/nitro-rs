@@ -146,6 +146,13 @@ impl BatchPoster {
 
         Ok(L1Bounds { min_ts: 0, max_ts, min_block: 0, max_block })
     }
+    async fn fetch_l1_base_fee_wei(&self) -> Option<u128> {
+        let provider = ProviderBuilder::new().connect_http(self.cfg.l1_rpc_url.parse().ok()?);
+        let block = provider.get_block_by_number(BlockNumberOrTag::Latest).await.ok()??;
+        let fee = block.header.inner.base_fee_per_gas?;
+        Some(fee.to::<u128>())
+    }
+
 
 
     async fn post_to_l1(&self, data: &[u8]) -> Result<B256> {
@@ -201,7 +208,8 @@ impl PosterService for BatchPoster {
         loop {
             tick.tick().await;
             if let Some(bytes) = self.build_batch_bytes().await? {
-                let _ = self.estimate_l1_cost(bytes.len(), 0);
+                let base_fee = self.fetch_l1_base_fee_wei().await.unwrap_or(0);
+                let _ = self.estimate_l1_cost(bytes.len(), base_fee);
                 let _ = self.post_to_l1(&bytes).await?;
             }
         }
