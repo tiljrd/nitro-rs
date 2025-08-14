@@ -32,7 +32,7 @@ impl NitroNode {
         let beacon_handle = arb_handle.node.add_ons_handle.beacon_engine_handle.clone();
         let payload_handle = arb_handle.node.payload_builder_handle.clone();
 
-        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(beacon_handle, payload_handle);
+        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(db.clone(), beacon_handle, payload_handle);
         let streamer_impl = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone(), exec));
         let streamer_trait = streamer_impl.clone() as Arc<dyn nitro_inbox::streamer::Streamer>;
 
