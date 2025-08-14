@@ -8,8 +8,14 @@ async fn main() -> anyhow::Result<()> {
     }
     tracing_subscriber::fmt().with_env_filter(EnvFilter::from_default_env()).init();
 
+    let args_vec: Vec<String> = std::env::args().collect();
+    if args_vec.iter().any(|a| a == "-h" || a == "--help" || a == "-V" || a == "--version") {
+        let _ = nitro_node::config::NodeArgs::parse();
+        return Ok(());
+    }
+
     let mut filtered = Vec::new();
-    let mut it = std::env::args().into_iter();
+    let mut it = args_vec.into_iter();
     if let Some(bin) = it.next() {
         filtered.push(bin);
     }
