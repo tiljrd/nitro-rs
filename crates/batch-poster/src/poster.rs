@@ -150,7 +150,7 @@ impl BatchPoster {
         let provider = ProviderBuilder::new().connect_http(self.cfg.l1_rpc_url.parse().ok()?);
         let block = provider.get_block_by_number(BlockNumberOrTag::Latest).await.ok()??;
         let fee = block.header.inner.base_fee_per_gas?;
-        Some(fee.to::<u128>())
+        Some(fee as u128)
     }
 
 
