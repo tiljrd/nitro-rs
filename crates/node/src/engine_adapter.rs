@@ -14,7 +14,7 @@ use reth_arbitrum_node::ArbEngineTypes;
 use reth_arbitrum_payload::ArbPayloadTypes;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use alloy_primitives::{Address, B256};
-use alloy_rpc_types::engine::PayloadAttributes;
+use reth_ethereum_engine_primitives::PayloadAttributes;
 use reth_payload_primitives::PayloadKind;
 
 

@@ -29,9 +29,11 @@ reth-payload-builder = { workspace = true }
 reth-payload-primitives = { workspace = true }
 reth-tasks = { workspace = true }
 
+# Use reth's engine primitives for PayloadAttributes to avoid version conflicts.
+reth-ethereum-engine-primitives = { path = "../../reth/crates/ethereum/engine-primitives" }
+
 alloy-primitives = { workspace = true }
 alloy-rlp = { workspace = true }
-alloy-rpc-types = "0.6"
 
 # Nitro-rs crates
 nitro-inbox = { path = "../inbox" }
