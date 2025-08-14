@@ -104,20 +104,6 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
     }
 
     pub async fn get_finalized_msg_count(&self) -> Result<u64> {
-impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxReader<B1, B2, D> {
-    pub fn get_last_read_batch_count(&self) -> u64 {
-        self.last_read_batch_count.load(Ordering::Relaxed)
-    }
-
-    pub fn get_last_seen_batch_count(&self) -> u64 {
-        self.last_seen_batch_count.load(Ordering::Relaxed)
-    }
-
-    pub fn get_delay_blocks(&self) -> u64 {
-        (self.config)().delay_blocks
-    }
-}
-
         let l1block = self.l1_reader.latest_finalized_block_nr().await?;
         self.recent_parent_chain_block_to_msg(l1block)
     }
@@ -145,5 +131,18 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
         }
         let new_from = from.saturating_sub(max_blocks_backwards).max(self.first_message_block);
         Ok(new_from)
+    }
+}
+impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxReader<B1, B2, D> {
+    pub fn get_last_read_batch_count(&self) -> u64 {
+        self.last_read_batch_count.load(Ordering::Relaxed)
+    }
+
+    pub fn get_last_seen_batch_count(&self) -> u64 {
+        self.last_seen_batch_count.load(Ordering::Relaxed)
+    }
+
+    pub fn get_delay_blocks(&self) -> u64 {
+        (self.config)().delay_blocks
     }
 }
