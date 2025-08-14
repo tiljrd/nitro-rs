@@ -166,9 +166,10 @@ impl<D: Database> InboxTracker<D> {
         let mut last_meta = prev_meta.clone();
         let mut to_cache: Vec<(u64, BatchMetadata)> = Vec::with_capacity(batches.len());
         for b in batches {
+            let msg_count_for_batch = last_meta.message_count + 1;
             let meta = BatchMetadata {
                 accumulator: b.after_inbox_acc,
-                message_count: b.after_message_count,
+                message_count: msg_count_for_batch,
                 delayed_message_count: b.after_delayed_count,
                 parent_chain_block: b.parent_chain_block_number,
             };
