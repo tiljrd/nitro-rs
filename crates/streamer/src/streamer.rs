@@ -8,7 +8,7 @@ use nitro_primitives::dbkeys::{
     MESSAGE_COUNT_KEY, MESSAGE_PREFIX, MESSAGE_RESULT_PREFIX,
     MISSING_BLOCK_METADATA_INPUT_FEED_PREFIX,
 };
-use nitro_primitives::message::{BlockHashDbValue, MessageWithMetadataAndBlockInfo};
+use nitro_primitives::message::{BlockHashDbValue, MessageResult, MessageWithMetadataAndBlockInfo};
 use std::sync::Arc;
 use tracing::info;
 
@@ -146,11 +146,22 @@ impl<D: Database> TransactionStreamer<D> {
         let mut dec = Decoder::new(&data);
         Ok(u64::decode(&mut dec)?)
     }
+    fn store_result(&self, msg_idx: u64, res: &MessageResult, batch: &mut dyn Batch) -> Result<()> {
+        let bytes = alloy_rlp::encode(res);
+        let key = db_key(MESSAGE_RESULT_PREFIX, msg_idx);
+        batch.put(&key, &bytes)?;
+        Ok(())
+    }
 
-    pub fn result_at_message_index(&self, index: u64) -> Result<Option<Vec<u8>>> {
+
+    pub fn result_at_message_index(&self, index: u64) -> Result<Option<MessageResult>> {
         let key = db_key(MESSAGE_RESULT_PREFIX, index);
         match self.db.get(&key) {
-            Ok(v) => Ok(Some(v)),
+            Ok(v) => {
+                let mut dec = Decoder::new(&v);
+                let res = MessageResult::decode(&mut dec)?;
+                Ok(Some(res))
+            }
             Err(e) if e.to_string().contains("not found") => Ok(None),
             Err(e) => Err(e),
         }

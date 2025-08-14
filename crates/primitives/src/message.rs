@@ -19,3 +19,8 @@ pub struct MessageWithMetadataAndBlockInfo {
 pub struct BlockHashDbValue {
     pub block_hash: Option<B256>,
 }
+#[derive(Clone, Debug, RlpEncodable, RlpDecodable)]
+pub struct MessageResult {
+    pub block_hash: B256,
+    pub send_root: B256,
+}
