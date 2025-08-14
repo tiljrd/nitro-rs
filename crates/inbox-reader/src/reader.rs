@@ -79,8 +79,159 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
     }
 
     pub async fn start(&self) -> Result<()> {
-        info!("inbox reader starting");
-        Ok(())
+        let read_mode = (self.config)().read_mode.clone();
+        let mut from = self.get_next_block_to_read().await?;
+        let (mut headers_rx, unsubscribe) = self.l1_reader.subscribe();
+        let mut blocks_to_fetch = {
+            let cfg = (self.config)();
+            cfg.default_blocks_to_read
+        };
+        let mut seen_batch_count: u64 = 0;
+        let mut seen_batch_count_stored: u64 = u64::MAX;
+        let mut store_seen = || {
+            if seen_batch_count_stored != seen_batch_count {
+                self.last_seen_batch_count.store(seen_batch_count, Ordering::Relaxed);
+                seen_batch_count_stored = seen_batch_count;
+            }
+        };
+        loop {
+            let cfg = (self.config)();
+            let mut current_height: u64 = 0;
+            if read_mode != "latest" {
+                let block_num = if read_mode == "safe" {
+                    self.l1_reader.latest_safe_block_nr().await?
+                } else {
+                    self.l1_reader.latest_finalized_block_nr().await?
+                };
+                if block_num == 0 {
+                    return Err(anyhow::anyhow!("unable to fetch latest {} block", read_mode));
+                }
+                current_height = block_num;
+                if from > current_height + 1 {
+                    from = current_height;
+                }
+                while current_height <= from {
+                    tokio::select! {
+                        v = headers_rx.recv() => {
+                            if v.is_none() {
+                                return Ok(());
+                            }
+                            let block_num2 = if read_mode == "safe" {
+                                self.l1_reader.latest_safe_block_nr().await?
+                            } else {
+                                self.l1_reader.latest_finalized_block_nr().await?
+                            };
+                            if block_num2 == 0 {
+                                return Err(anyhow::anyhow!("unable to fetch latest {} block", read_mode));
+                            }
+                            current_height = block_num2;
+                        }
+                    }
+                }
+            } else {
+                let latest = self.l1_reader.last_header().await?;
+                current_height = latest.number;
+                let needed_block_advance = cfg.delay_blocks + cfg.min_blocks_to_read.saturating_sub(1);
+                let needed_block_height = from.saturating_add(needed_block_advance);
+                let mut delay = tokio::time::interval(std::time::Duration::from_millis(cfg.check_delay_ms));
+                delay.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    if current_height >= needed_block_height {
+                        break;
+                    }
+                    tokio::select! {
+                        v = headers_rx.recv() => {
+                            if v.is_none() {
+                                return Ok(());
+                            }
+                            if let Some(h) = v {
+                                current_height = h.number;
+                            }
+                        }
+                        _ = delay.tick() => {
+                            break;
+                        }
+                    }
+                }
+                if cfg.delay_blocks > 0 {
+                    if current_height >= cfg.delay_blocks {
+                        current_height -= cfg.delay_blocks;
+                    } else {
+                        current_height = 0;
+                    }
+                    if current_height < self.first_message_block {
+                        current_height = self.first_message_block;
+                    }
+                }
+            }
+
+            let mut reorging_delayed = false;
+            let mut reorging_sequencer = false;
+            let mut missing_delayed = false;
+            let mut missing_sequencer = false;
+
+            {
+                let mut checking_delayed_count = self.delayed_bridge.get_message_count(current_height).await?;
+                let our_latest_delayed = self.tracker.get_delayed_count()?;
+                if our_latest_delayed < checking_delayed_count {
+                    checking_delayed_count = our_latest_delayed;
+                    missing_delayed = true;
+                } else if our_latest_delayed > checking_delayed_count {
+                    self.tracker.reorg_delayed_to(checking_delayed_count)?;
+                }
+                if checking_delayed_count > 0 {
+                    let checking_delayed_seq = checking_delayed_count - 1;
+                    let l1_delayed_acc = self.delayed_bridge.get_accumulator(checking_delayed_seq, current_height, alloy_primitives::B256::ZERO).await?;
+                    let db_delayed_acc = self.tracker.get_delayed_acc(checking_delayed_seq)?;
+                    if db_delayed_acc != l1_delayed_acc {
+                        reorging_delayed = true;
+                    }
+                }
+            }
+
+            seen_batch_count = self.sequencer_inbox.get_batch_count(current_height).await.unwrap_or(0);
+            let checking_batch_count = seen_batch_count;
+            {
+                let our_latest_batch = self.tracker.get_batch_count()?;
+                if our_latest_batch < seen_batch_count {
+                    missing_sequencer = true;
+                }
+                if checking_batch_count > 0 {
+                    let checking_batch_seq = checking_batch_count - 1;
+                    let l1_batch_acc = self.sequencer_inbox.get_accumulator(checking_batch_seq, current_height).await?;
+                    let db_batch_acc = self.tracker.get_batch_acc(checking_batch_seq)?;
+                    if db_batch_acc != l1_batch_acc {
+                        reorging_sequencer = true;
+                    }
+                }
+            }
+
+            if !missing_delayed && !reorging_delayed && !missing_sequencer && !reorging_sequencer {
+                from = current_height.saturating_add(1);
+                blocks_to_fetch = cfg.default_blocks_to_read;
+                self.last_read_batch_count.store(checking_batch_count, Ordering::Relaxed);
+                store_seen();
+                if !self.caught_up && read_mode == "latest" {
+                    self.caught_up = true;
+                    let _ = self.caught_up_tx.send(true);
+                }
+                continue;
+            }
+
+            self.last_read_batch_count.store(checking_batch_count, Ordering::Relaxed);
+            store_seen();
+            if reorging_delayed || reorging_sequencer {
+                let prev = self.get_prev_block_for_reorg(from, blocks_to_fetch)?;
+                from = prev;
+            } else {
+                from = from.saturating_add(blocks_to_fetch).min(current_height).saturating_add(1);
+            }
+        }
+        #[allow(unreachable_code)]
+        {
+            let _ = unsubscribe;
+            Ok(())
+        }
     }
 }
 impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxReader<B1, B2, D> {

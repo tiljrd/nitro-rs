@@ -108,6 +108,18 @@ impl<D: Database> InboxTracker<D> {
         let mut dec = alloy_rlp::Decoder::new(&data);
         Ok(u64::decode(&mut dec)?)
     }
+    pub fn reorg_delayed_to(&self, new_delayed_count: u64) -> anyhow::Result<()> {
+        let mut batch = self.db.new_batch();
+        self.set_delayed_count_reorg_and_write_batch(
+            batch.as_mut(),
+            new_delayed_count,
+            new_delayed_count,
+            true,
+        )?;
+        batch.write()?;
+        Ok(())
+    }
+
 
     pub fn set_delayed_count_reorg_and_write_batch(
         &self,
