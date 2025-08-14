@@ -4,6 +4,7 @@ use alloy_primitives::{keccak256, Address, B256, U256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockNumberOrTag, Filter};
 use async_trait::async_trait;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 pub struct EthDelayedBridge {
@@ -82,16 +83,22 @@ impl DelayedBridge for EthDelayedBridge {
     where
         F: Fn(u64) -> anyhow::Result<Vec<u8>> + Send + Sync,
     {
-        let topic0 = B256::from_slice(&keccak256("MessageDelivered(address,address,uint8,uint256,bytes32,bytes32,uint64,bytes32,uint64)".as_bytes()));
+        let message_delivered_topic = B256::from_slice(
+            &keccak256("MessageDelivered(address,address,uint8,uint256,bytes32,bytes32,uint64,bytes32,uint64)".as_bytes()),
+        );
         let filter = Filter {
             from_block: Some(from_block.into()),
             to_block: Some(to_block.into()),
             address: Some(vec![self.bridge_addr]),
-            topics: Some(vec![vec![topic0]]),
+            topics: Some(vec![vec![message_delivered_topic]]),
             block_hash: None,
         };
         let logs = self.provider.get_logs(&filter).await?;
-        let mut out = Vec::with_capacity(logs.len());
+
+        let mut inbox_addresses: BTreeSet<Address> = BTreeSet::new();
+        let mut message_ids: Vec<B256> = Vec::with_capacity(logs.len());
+        let mut parsed: Vec<(DelayedInboxMessage, Address, B256)> = Vec::with_capacity(logs.len());
+
         for lg in logs {
             if lg.data.len() < 32 * 7 {
                 continue;
@@ -102,6 +109,13 @@ impl DelayedBridge for EthDelayedBridge {
             let sender = Address::from_slice(&lg.data[96 + 12..96 + 32]);
             let request_id = B256::from_slice(&lg.data[128..160]);
             let basefee = Self::decode_u256_word(&lg.data[160..192])?;
+
+            let inbox_addr = if lg.topics.len() > 1 {
+                Address::from_slice(&lg.topics[1].0[12..32])
+            } else {
+                Address::ZERO
+            };
+
             let header = nitro_primitives::l1::L1IncomingMessageHeader {
                 kind,
                 poster: sender,
@@ -111,14 +125,86 @@ impl DelayedBridge for EthDelayedBridge {
                 l1_base_fee: basefee,
             };
             let msg = nitro_primitives::l1::L1IncomingMessage { header, l2msg: Vec::new(), batch_gas_cost: None };
-            out.push(DelayedInboxMessage {
+            let dim = DelayedInboxMessage {
                 seq_num: U256::from_be_bytes(request_id.0).to::<u64>(),
                 block_hash: lg.block_hash.unwrap_or_default(),
                 before_inbox_acc: before_acc,
                 message: msg,
                 parent_chain_block_number: lg.block_number.unwrap_or_default(),
-            });
+            };
+            inbox_addresses.insert(inbox_addr);
+            message_ids.push(request_id);
+            parsed.push((dim, inbox_addr, request_id));
         }
+
+        if parsed.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let inbox_msg_delivered = B256::from_slice(&keccak256("InboxMessageDelivered(uint256,bytes)".as_bytes()));
+        let inbox_msg_from_origin = B256::from_slice(&keccak256("InboxMessageDeliveredFromOrigin(uint256)".as_bytes()));
+
+        let mut data_by_id: HashMap<B256, Vec<u8>> = HashMap::with_capacity(message_ids.len());
+        if !inbox_addresses.is_empty() {
+            let addresses = inbox_addresses.into_iter().collect::<Vec<_>>();
+            let topics = Some(vec![vec![inbox_msg_delivered, inbox_msg_from_origin], message_ids.clone()]);
+            let q = Filter {
+                from_block: Some(from_block.into()),
+                to_block: Some(to_block.into()),
+                address: Some(addresses),
+                topics,
+                block_hash: None,
+            };
+            let ilogs = self.provider.get_logs(&q).await?;
+            for lg in ilogs {
+                if lg.topics.is_empty() || lg.topics.len() < 2 {
+                    continue;
+                }
+                let topic0 = lg.topics[0];
+                let msg_id = lg.topics[1];
+                if topic0 == inbox_msg_delivered {
+                    if lg.data.len() >= 64 {
+                        let mut len_bytes = [0u8; 32];
+                        len_bytes.copy_from_slice(&lg.data[32..64]);
+                        let len = U256::from_be_bytes(len_bytes).to::<usize>();
+                        if lg.data.len() >= 64 + len {
+                            let bytes = lg.data[64..64 + len].to_vec();
+                            data_by_id.insert(msg_id, bytes);
+                        }
+                    }
+                } else if topic0 == inbox_msg_from_origin {
+                    if let Some(tx_hash) = lg.transaction_hash {
+                        if let Ok(Some(tx)) = self.provider.get_transaction_by_hash(tx_hash).await {
+                            let input = tx.input;
+                            if input.len() >= 4 + 32 {
+                                let selector = &input[0..4];
+                                let expected = Self::encode_selector("sendL2MessageFromOrigin(bytes)");
+                                if selector == expected {
+                                    if input.len() >= 4 + 64 {
+                                        let mut len_bytes = [0u8; 32];
+                                        len_bytes.copy_from_slice(&input[4 + 32..4 + 64]);
+                                        let len = U256::from_be_bytes(len_bytes).to::<usize>();
+                                        if input.len() >= 4 + 64 + len {
+                                            let bytes = input[4 + 64..4 + 64 + len].to_vec();
+                                            data_by_id.insert(msg_id, bytes);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut out: Vec<DelayedInboxMessage> = Vec::with_capacity(parsed.len());
+        for (mut dim, _inbox, req_id) in parsed {
+            if let Some(data) = data_by_id.get(&req_id) {
+                dim.message.l2msg = data.clone();
+            }
+            out.push(dim);
+        }
+
         out.sort_by_key(|m| U256::from_be_bytes(m.message.header.request_id.unwrap().0));
         Ok(out)
     }
