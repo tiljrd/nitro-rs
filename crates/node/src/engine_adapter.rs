@@ -14,7 +14,7 @@ use reth_arbitrum_node::ArbEngineTypes;
 use reth_arbitrum_payload::ArbPayloadTypes;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use alloy_primitives::{Address, B256};
-use reth_ethereum_engine_primitives::PayloadAttributes;
+use reth_node_api::PayloadAttributes;
 use reth_payload_primitives::PayloadKind;
 
 
@@ -112,7 +112,7 @@ impl ExecEngine for RethExecEngine {
             <ArbPayloadTypes as reth_payload_primitives::PayloadTypes>::block_to_payload(sealed);
 
         let _status = beacon
-            .new_payload(&exec_data)
+            .new_payload(exec_data)
             .await
             .map_err(|e| anyhow!("engine new_payload error: {e}"))?;
 
