@@ -157,6 +157,9 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                         current_height = self.first_message_block;
                     }
                 }
+                if from > current_height {
+                    from = current_height;
+                }
             }
 
             let mut reorging_delayed = false;

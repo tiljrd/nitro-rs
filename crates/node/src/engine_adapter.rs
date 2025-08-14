@@ -56,7 +56,7 @@ impl ExecEngine for RethExecEngine {
         let count = <u64 as alloy_rlp::Decodable>::decode(&mut slice)
             .map_err(|e| anyhow!("failed to decode message count: {e}"))?;
         if count == 0 {
-            return Err(anyhow!("no messages"));
+            return Ok(0);
         }
         Ok(count - 1)
     }

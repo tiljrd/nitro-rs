@@ -51,6 +51,10 @@ impl<D: Database> InboxTracker<D> {
             let value = alloy_rlp::encode(&0u64);
             batch.put(SEQUENCER_BATCH_COUNT_KEY, &value)?;
         }
+        if !self.db.has(MESSAGE_COUNT_KEY)? {
+            let value = alloy_rlp::encode(&0u64);
+            batch.put(MESSAGE_COUNT_KEY, &value)?;
+        }
         batch.write()?;
         Ok(())
     }
