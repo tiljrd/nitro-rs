@@ -429,6 +429,35 @@ impl<D: Database> InboxTracker<D> {
         let msg = self.get_delayed_message(seqnum)?;
         serialize_incoming_l1_message_legacy(&msg)
     }
+    pub fn reorg_batches_to_db(&self, count: u64) -> anyhow::Result<u64> {
+        let mut prev_batch_meta = BatchMetadata {
+            accumulator: B256::ZERO,
+            message_count: 0,
+            delayed_message_count: 0,
+            parent_chain_block: 0,
+        };
+        if count > 0 {
+            match self.get_batch_metadata(count - 1) {
+                Ok(m) => prev_batch_meta = m,
+                Err(e) => anyhow::bail!("attempted to reorg to future batch count: {}", e),
+            }
+        }
+
+        let mut db_batch = self.db.new_batch();
+        crate::util::delete_starting_at(
+            self.db.as_ref(),
+            db_batch.as_mut(),
+            DELAYED_SEQUENCED_PREFIX,
+            &uint64_to_key(prev_batch_meta.delayed_message_count + 1),
+        )?;
+        self.delete_batch_metadata_starting_at(count)?;
+        let count_enc = alloy_rlp::encode(&count);
+        db_batch.put(SEQUENCER_BATCH_COUNT_KEY, &count_enc)?;
+        db_batch.write()?;
+
+        Ok(prev_batch_meta.message_count)
+    }
+
 
 
 }
