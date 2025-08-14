@@ -8,6 +8,7 @@ use nitro_batch_poster::poster::PosterService;
 use nitro_validator::ValidatorService;
 
 use alloy_primitives::Address;
+use alloy_chains::Chain;
 
 use crate::config::NodeArgs;
 
@@ -149,7 +150,14 @@ impl NitroNode {
         rpc.ws_addr = http_ip;
         rpc.ws_port = rpc_ws_port_cfg;
 
-        let arb_cfg = NodeConfig::test().with_rpc(rpc);
+        let chain_id = match self.args.network.as_deref() {
+            Some("sepolia") | None => 421_614u64,
+            Some("local") => 1337u64,
+            Some(_) => 421_614u64,
+        };
+        let mut spec = reth_chainspec::ChainSpec::default();
+        spec.chain = Chain::from(chain_id);
+        let arb_cfg = NodeConfig::new(Arc::new(spec)).with_rpc(rpc);
         let builder = NodeBuilder::new(arb_cfg);
         let task_manager = TaskManager::current();
         let task_executor = task_manager.executor();
