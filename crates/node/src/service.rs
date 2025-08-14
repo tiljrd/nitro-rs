@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::info;
@@ -9,6 +9,7 @@ use alloy_primitives::Address;
 use crate::config::NodeArgs;
 
 use reth_node_core::node_config::NodeConfig;
+use reth_node_core::args::RpcServerArgs;
 use reth_node_builder::NodeBuilder;
 use reth_arbitrum_node::{ArbNode, args::RollupArgs};
 use reth_tasks::TaskManager;
@@ -22,16 +23,6 @@ impl NitroNode {
         Self { args }
     }
 
-    async fn start_rpc_servers(&self, arb_handle: &reth_node_builder::LaunchedNode<reth_arbitrum_node::ArbNode<reth_arbitrum_node::ArbEngineTypes<reth_arbitrum_payload::ArbPayloadTypes>>>) -> Result<()> {
-        let rpc_host = self.args.rpc_host.clone();
-        let rpc_port = self.args.rpc_port;
-        let ws_port = self.args.ws_port;
-        let http_addr: SocketAddr = format!("{}:{}", rpc_host, rpc_port).parse().unwrap();
-        let ws_addr: SocketAddr = format!("{}:{}", rpc_host, ws_port).parse().unwrap();
-        let _ = arb_handle.node.start_http_server(http_addr).await.map_err(|e| anyhow::anyhow!(e))?;
-        let _ = arb_handle.node.start_ws_server(ws_addr).await.map_err(|e| anyhow::anyhow!(e))?;
-        Ok(())
-    }
 
     async fn start_feed_server(&self, _tracker: Arc<nitro_inbox::tracker::InboxTracker<nitro_db_sled::SledDb>>) -> Result<()> {
         if !self.args.feed_enable {
@@ -56,7 +47,18 @@ impl NitroNode {
         let db_path = std::env::var("NITRO_DB_PATH").unwrap_or_else(|_| "./nitro-db".to_string());
         let db = Arc::new(nitro_db_sled::SledDb::open(&db_path)?);
 
-        let arb_cfg = NodeConfig::test();
+        let mut rpc = RpcServerArgs::default().with_http().with_ws();
+        let http_ip: IpAddr = self
+            .args
+            .rpc_host
+            .parse()
+            .unwrap_or(Ipv4Addr::UNSPECIFIED.into());
+        rpc.http_addr = http_ip;
+        rpc.http_port = self.args.rpc_port;
+        rpc.ws_addr = http_ip;
+        rpc.ws_port = self.args.ws_port;
+
+        let arb_cfg = NodeConfig::test().with_rpc(rpc);
         let builder = NodeBuilder::new(arb_cfg);
         let task_manager = TaskManager::current();
         let task_executor = task_manager.executor();
@@ -176,13 +178,6 @@ impl NitroNode {
             }
         });
 
-        let rpc_task = tokio::spawn({
-            let this = self.clone_args();
-            let arb_handle = arb_handle.clone();
-            async move {
-                let _ = this.start_rpc_servers(&arb_handle).await;
-            }
-        });
 
         let poster_task = if self.args.poster_enable {
             let poster = nitro_batch_poster::poster::BatchPoster::new();
@@ -194,7 +189,7 @@ impl NitroNode {
             Some(tokio::spawn(async move { let _ = validator.start().await; }))
         } else { None };
 
-        let _ = tokio::join!(reader_task, streamer_task, feed_task, rpc_task);
+        let _ = tokio::join!(reader_task, streamer_task, feed_task);
         if let Some(t) = poster_task { let _ = t.await; }
         if let Some(t) = validator_task { let _ = t.await; }
 
