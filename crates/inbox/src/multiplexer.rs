@@ -50,7 +50,7 @@ pub fn parse_sequencer_message(batch_num: u64, _batch_block_hash: Option<B256>, 
     let mut segments: Vec<Vec<u8>> = Vec::new();
     if !payload.is_empty() {
         let first = payload[0];
-        if first == 0x01 { // heuristic: brotli flag per Nitro, value checked via daprovider
+        if first == 0x01 {
             let mut decompressed = Vec::new();
             let mut reader = brotli::Decompressor::new(&payload[1..], 4096);
             reader.read_to_end(&mut decompressed)?;
@@ -65,6 +65,16 @@ pub fn parse_sequencer_message(batch_num: u64, _batch_block_hash: Option<B256>, 
                 }
             }
         } else {
+            let mut cur = payload;
+            while !cur.is_empty() {
+                match <Vec<u8> as Decodable>::decode(&mut cur) {
+                    Ok(seg) => {
+                        segments.push(seg);
+                        if segments.len() > 100 * 1024 { break; }
+                    }
+                    Err(_) => break,
+                }
+            }
         }
     }
 
