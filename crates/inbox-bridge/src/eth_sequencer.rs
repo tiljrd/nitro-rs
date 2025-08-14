@@ -121,9 +121,37 @@ impl SequencerInbox for EthSequencerInbox {
 
     async fn get_sequencer_message_bytes_in_block(
         &self,
-        _block_number: u64,
-        _seq_num: u64,
+        block_number: u64,
+        seq_num: u64,
     ) -> anyhow::Result<(Vec<u8>, B256, Vec<u64>)> {
-        anyhow::bail!("unimplemented")
+        let topic0 = B256::from_slice(&keccak256("SequencerBatchData(uint64,bytes)".as_bytes()));
+        let mut topic1_bytes = [0u8; 32];
+        topic1_bytes[24..32].copy_from_slice(&seq_num.to_be_bytes());
+        let topic1 = B256::from_slice(&topic1_bytes);
+        let filter = Filter {
+            from_block: Some(block_number.into()),
+            to_block: Some(block_number.into()),
+            address: Some(vec![self.inbox_addr]),
+            topics: Some(vec![vec![topic0], vec![topic1]]),
+            block_hash: None,
+        };
+        let logs = self.provider.get_logs(&filter).await?;
+        if logs.len() != 1 {
+            anyhow::bail!("expected exactly 1 SequencerBatchData log for seq {} at block {}", seq_num, block_number);
+        }
+        let lg = &logs[0];
+        let data = &lg.data;
+        if data.len() < 64 {
+            anyhow::bail!("invalid SequencerBatchData encoding");
+        }
+        let mut len_bytes = [0u8; 32];
+        len_bytes.copy_from_slice(&data[32..64]);
+        let len = U256::from_be_bytes(len_bytes).to::<usize>();
+        if data.len() < 64 + len {
+            anyhow::bail!("short SequencerBatchData payload");
+        }
+        let batch_bytes = data[64..64 + len].to_vec();
+        let block_hash = lg.block_hash.unwrap_or_default();
+        Ok((batch_bytes, block_hash, Vec::new()))
     }
 }
