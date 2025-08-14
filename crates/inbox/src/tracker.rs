@@ -1,7 +1,5 @@
-use crate::db::{Batch as DbBatch, Database};
+use crate::db::{Database};
 use alloy_primitives::B256;
-use arb_alloy_util as arb_util;
-use reth_arbitrum_primitives as _;
 use nitro_primitives::dbkeys::*;
 use std::sync::{Arc, Mutex};
 
@@ -107,6 +105,58 @@ impl<D: Database> InboxTracker<D> {
         let data = self.db.get(SEQUENCER_BATCH_COUNT_KEY)?;
         let mut dec = alloy_rlp::Decoder::new(&data);
         Ok(u64::decode(&mut dec)?)
+    }
+
+    pub fn delete_batch_metadata_starting_at(&self, start_index: u64) -> anyhow::Result<()> {
+        let mut cache = self.batch_meta_cache.lock().unwrap();
+        let mut iter = self.db.new_iterator(SEQUENCER_BATCH_META_PREFIX, &uint64_to_key(start_index));
+        let mut batch = self.db.new_batch();
+        while iter.next() {
+            let key = iter.key();
+            batch.delete(key)?;
+            let prefix_len = SEQUENCER_BATCH_META_PREFIX.len();
+            if key.len() >= prefix_len + 8 {
+                let mut idx_bytes = [0u8; 8];
+                idx_bytes.copy_from_slice(&key[prefix_len..prefix_len + 8]);
+                let idx = u64::from_be_bytes(idx_bytes);
+                cache.remove(&idx);
+            }
+        }
+        if let Some(err) = iter.error() {
+            return Err(err);
+        }
+        iter.release();
+        batch.write()?;
+        Ok(())
+    }
+
+    pub fn find_inbox_batch_containing_message(&self, pos: u64) -> anyhow::Result<(u64, bool)> {
+        let batch_count = self.get_batch_count()?;
+        if batch_count == 0 {
+            return Ok((0, false));
+        }
+        let mut low = 0u64;
+        let mut high = batch_count - 1;
+        let last_count = self.get_batch_message_count(high)?;
+        if last_count <= pos {
+            return Ok((0, false));
+        }
+        loop {
+            let mid = (low + high) / 2;
+            let count = self.get_batch_message_count(mid)?;
+            if count < pos {
+                low = mid + 1;
+            } else if count == pos {
+                return Ok((mid + 1, true));
+            } else if count == pos + 1 || mid == low {
+                return Ok((mid, true));
+            } else {
+                high = mid;
+            }
+            if high == low {
+                return Ok((high, true));
+            }
+        }
     }
 }
 
