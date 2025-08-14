@@ -12,14 +12,16 @@ use nitro_primitives::dbkeys::{
 use nitro_primitives::message::{BlockHashDbValue, MessageResult, MessageWithMetadata, MessageWithMetadataAndBlockInfo};
 use std::sync::Arc;
 use tracing::info;
+use crate::engine::ExecEngine;
 
 pub struct TransactionStreamer<D: Database> {
     db: Arc<D>,
+    exec: Arc<dyn ExecEngine>,
 }
 
 impl<D: Database> TransactionStreamer<D> {
-    pub fn new(db: Arc<D>) -> Self {
-        Self { db }
+    pub fn new(db: Arc<D>, exec: Arc<dyn ExecEngine>) -> Self {
+        Self { db, exec }
     }
 
     pub async fn start(&self) -> Result<()> {
@@ -270,6 +272,28 @@ impl<D: Database> TransactionStreamer<D> {
         }
 
         self.write_messages(first_msg_idx, &messages, None, track_block_metadata_from)
+    }
+    pub async fn execute_next_msg(&self) -> Result<bool> {
+        let consensus_head = self.get_head_message_index()?;
+        let exec_head = self.exec.head_message_index().await?;
+        if exec_head >= consensus_head {
+            return Ok(false);
+        }
+        let msg_idx = exec_head + 1;
+        let msg_and_block = self.get_message_with_metadata_and_block_info(msg_idx)?;
+        let mut msg_for_prefetch: Option<MessageWithMetadata> = None;
+        if msg_idx + 1 <= consensus_head {
+            msg_for_prefetch = Some(self.get_message(msg_idx + 1)?);
+        }
+        let res = self.exec.digest_message(
+            msg_idx,
+            &msg_and_block.message_with_meta,
+            msg_for_prefetch.as_ref(),
+        ).await?;
+        let mut batch = self.db.new_batch();
+        self.store_result(msg_idx, &res, batch.as_mut())?;
+        batch.write()?;
+        Ok(msg_idx + 1 <= consensus_head)
     }
 
 

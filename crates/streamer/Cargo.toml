@@ -13,3 +13,4 @@ nitro-inbox = { path = "../inbox" }
 nitro-primitives = { path = "../primitives" }
 alloy-rlp = { workspace = true }
 alloy-primitives = { workspace = true }
+async-trait = "0.1"
