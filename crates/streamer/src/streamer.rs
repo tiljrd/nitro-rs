@@ -1,7 +1,14 @@
 use anyhow::Result;
 use alloy_primitives::B256;
-use nitro_inbox::db::Database;
-use nitro_primitives::dbkeys::{MESSAGE_COUNT_KEY, MESSAGE_RESULT_PREFIX, db_key};
+use alloy_rlp::{Decoder, Encodable};
+use nitro_inbox::db::{Batch, Database};
+use nitro_inbox::util::delete_starting_at;
+use nitro_primitives::dbkeys::{
+    db_key, BLOCK_HASH_INPUT_FEED_PREFIX, BLOCK_METADATA_INPUT_FEED_PREFIX,
+    MESSAGE_COUNT_KEY, MESSAGE_PREFIX, MESSAGE_RESULT_PREFIX,
+    MISSING_BLOCK_METADATA_INPUT_FEED_PREFIX,
+};
+use nitro_primitives::message::{BlockHashDbValue, MessageWithMetadataAndBlockInfo};
 use std::sync::Arc;
 use tracing::info;
 
@@ -19,17 +26,124 @@ impl<D: Database> TransactionStreamer<D> {
         Ok(())
     }
 
+    fn set_message_count(&self, batch: &mut dyn Batch, count: u64) -> Result<()> {
+        let enc = alloy_rlp::encode(&count);
+        batch.put(MESSAGE_COUNT_KEY, &enc)?;
+        Ok(())
+    }
+
+    fn write_message(
+        &self,
+        msg_idx: u64,
+        msg: &MessageWithMetadataAndBlockInfo,
+        batch: &mut dyn Batch,
+        track_block_metadata_from: Option<u64>,
+    ) -> Result<()> {
+        let key_msg = db_key(MESSAGE_PREFIX, msg_idx);
+        let msg_bytes = alloy_rlp::encode(&msg.message_with_meta);
+        batch.put(&key_msg, &msg_bytes)?;
+
+        let key_bh = db_key(BLOCK_HASH_INPUT_FEED_PREFIX, msg_idx);
+        let bh_bytes = alloy_rlp::encode(&BlockHashDbValue { block_hash: msg.block_hash });
+        batch.put(&key_bh, &bh_bytes)?;
+
+        if let Some(start_from) = track_block_metadata_from {
+            if msg_idx >= start_from {
+                if let Some(ref meta) = msg.block_metadata {
+                    let key_meta = db_key(BLOCK_METADATA_INPUT_FEED_PREFIX, msg_idx);
+                    batch.put(&key_meta, meta)?;
+                } else {
+                    let key_missing = db_key(MISSING_BLOCK_METADATA_INPUT_FEED_PREFIX, msg_idx);
+                    batch.put(&key_missing, &[])?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn write_messages(
+        &self,
+        first_msg_idx: u64,
+        messages: &[MessageWithMetadataAndBlockInfo],
+        mut batch: Option<Box<dyn Batch>>,
+        track_block_metadata_from: Option<u64>,
+    ) -> Result<()> {
+        let mut local = false;
+        if batch.is_none() {
+            batch = Some(self.db.new_batch());
+            local = true;
+        }
+        let b = batch.as_mut().unwrap().as_mut();
+        for (i, m) in messages.iter().enumerate() {
+            let idx = first_msg_idx + i as u64;
+            self.write_message(idx, m, b, track_block_metadata_from)?;
+        }
+        self.set_message_count(b, first_msg_idx + messages.len() as u64)?;
+        if local {
+            batch.unwrap().write()?;
+        }
+        Ok(())
+    }
+
     pub fn add_messages_and_reorg(
         &self,
-        _delayed: &[(u64, B256, Vec<u8>)],
-        _sequencer_batches: &[(u64, Vec<u8>)],
+        msg_idx_of_first_msg_to_add: u64,
+        new_messages: &[MessageWithMetadataAndBlockInfo],
+        track_block_metadata_from: Option<u64>,
     ) -> Result<()> {
+        if msg_idx_of_first_msg_to_add == 0 {
+            return Err(anyhow::anyhow!("cannot reorg out init message"));
+        }
+        let mut batch = self.db.new_batch();
+
+        delete_starting_at(
+            self.db.as_ref(),
+            batch.as_mut(),
+            MESSAGE_RESULT_PREFIX,
+            &msg_idx_of_first_msg_to_add.to_be_bytes(),
+        )?;
+        delete_starting_at(
+            self.db.as_ref(),
+            batch.as_mut(),
+            BLOCK_HASH_INPUT_FEED_PREFIX,
+            &msg_idx_of_first_msg_to_add.to_be_bytes(),
+        )?;
+        delete_starting_at(
+            self.db.as_ref(),
+            batch.as_mut(),
+            BLOCK_METADATA_INPUT_FEED_PREFIX,
+            &msg_idx_of_first_msg_to_add.to_be_bytes(),
+        )?;
+        delete_starting_at(
+            self.db.as_ref(),
+            batch.as_mut(),
+            MISSING_BLOCK_METADATA_INPUT_FEED_PREFIX,
+            &msg_idx_of_first_msg_to_add.to_be_bytes(),
+        )?;
+        delete_starting_at(
+            self.db.as_ref(),
+            batch.as_mut(),
+            MESSAGE_PREFIX,
+            &msg_idx_of_first_msg_to_add.to_be_bytes(),
+        )?;
+
+        self.set_message_count(batch.as_mut(), msg_idx_of_first_msg_to_add)?;
+        batch.write()?;
+
+        if !new_messages.is_empty() {
+            self.write_messages(
+                msg_idx_of_first_msg_to_add,
+                new_messages,
+                None,
+                track_block_metadata_from,
+            )?;
+        }
         Ok(())
     }
 
     pub fn message_count(&self) -> Result<u64> {
         let data = self.db.get(MESSAGE_COUNT_KEY)?;
-        let mut dec = alloy_rlp::Decoder::new(&data);
+        let mut dec = Decoder::new(&data);
         Ok(u64::decode(&mut dec)?)
     }
 
