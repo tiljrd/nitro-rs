@@ -2,6 +2,7 @@ use crate::db::{Database};
 use alloy_primitives::B256;
 use nitro_primitives::dbkeys::*;
 use nitro_primitives::accumulator::hash_after;
+use nitro_primitives::l1::{L1IncomingMessage, parse_incoming_l1_message_legacy, serialize_incoming_l1_message_legacy};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -219,6 +220,54 @@ impl<D: Database> InboxTracker<D> {
                 anyhow::bail!("unexpected delayed sequence number {}, expected {}", seqnum, pos);
             }
             if next_acc != *before_acc {
+    pub fn legacy_get_delayed_message_and_accumulator(&self, seqnum: u64) -> anyhow::Result<(L1IncomingMessage, B256)> {
+        let key = db_key(LEGACY_DELAYED_MESSAGE_PREFIX, seqnum);
+        let data = self.db.get(&key)?;
+        if data.len() < 32 {
+            anyhow::bail!("delayed message legacy entry missing accumulator");
+        }
+        let acc = B256::from_slice(&data[..32]);
+        let msg = parse_incoming_l1_message_legacy(&data[32..])?;
+        Ok((msg, acc))
+    }
+
+    pub fn get_delayed_message_accumulator_and_parent_chain_block_number(&self, seqnum: u64) -> anyhow::Result<(L1IncomingMessage, B256, u64)> {
+        let key = db_key(RLP_DELAYED_MESSAGE_PREFIX, seqnum);
+        if self.db.has(&key)? {
+            let data = self.db.get(&key)?;
+            if data.len() < 32 {
+                anyhow::bail!("delayed message new entry missing accumulator");
+            }
+            let acc = B256::from_slice(&data[..32]);
+            let mut dec = alloy_rlp::Decoder::new(&data[32..]);
+            let msg: L1IncomingMessage = L1IncomingMessage::decode(&mut dec)?;
+            let pkey = db_key(PARENT_CHAIN_BLOCK_NUMBER_PREFIX, seqnum);
+            let parent_block = if self.db.has(&pkey)? {
+                let v = self.db.get(&pkey)?;
+                if v.len() != 8 {
+                    anyhow::bail!("invalid parent chain block number encoding");
+                }
+                u64::from_be_bytes(v.try_into().unwrap())
+            } else {
+                msg.header.block_number
+            };
+            Ok((msg, acc, parent_block))
+        } else {
+            let (msg, acc) = self.legacy_get_delayed_message_and_accumulator(seqnum)?;
+            Ok((msg, acc, 0))
+        }
+    }
+
+    pub fn get_delayed_message(&self, seqnum: u64) -> anyhow::Result<L1IncomingMessage> {
+        let (msg, _, _) = self.get_delayed_message_accumulator_and_parent_chain_block_number(seqnum)?;
+        Ok(msg)
+    }
+
+    pub fn get_delayed_message_bytes(&self, seqnum: u64) -> anyhow::Result<Vec<u8>> {
+        let msg = self.get_delayed_message(seqnum)?;
+        serialize_incoming_l1_message_legacy(&msg)
+    }
+
                 anyhow::bail!("previous delayed accumulator mismatch for message {}", seqnum);
             }
             let mut data = next_acc.0.to_vec();
