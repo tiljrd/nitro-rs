@@ -26,3 +26,5 @@ nitro-batch-poster = { path = "../batch-poster" }
 nitro-validator = { path = "../validator" }
 nitro-rpc = { path = "../rpc" }
 nitro-primitives = { path = "../primitives" }
+nitro-db-sled = { path = "../db-sled" }
+inbox-bridge = { path = "../inbox-bridge" }

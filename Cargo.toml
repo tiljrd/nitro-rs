@@ -9,6 +9,7 @@ members = [
     "crates/validator",
     "crates/rpc",
     "crates/primitives",
+    "crates/db-sled",
     "bin/arb-nitro-rs",
 ]
 resolver = "2"
