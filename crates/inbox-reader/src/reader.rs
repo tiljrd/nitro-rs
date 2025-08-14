@@ -71,5 +71,16 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
     pub async fn start(&self) -> Result<()> {
         info!("inbox reader starting");
         Ok(())
+impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxReader<B1, B2, D> {
+    async fn get_next_block_to_read(&self) -> Result<u64> {
+        let delayed_count = self.tracker.get_delayed_count()?;
+        if delayed_count == 0 {
+            return Ok(self.first_message_block.to());
+        }
+        let (_, parent_block) = self.tracker.get_delayed_message_accumulator_and_parent_chain_block_number(delayed_count - 1)?;
+        Ok(parent_block)
+    }
+}
+
     }
 }
