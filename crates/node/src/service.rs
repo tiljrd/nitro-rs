@@ -22,9 +22,10 @@ impl NitroNode {
         let db_path = std::env::var("NITRO_DB_PATH").unwrap_or_else(|_| "./nitro-db".to_string());
         let db = Arc::new(nitro_db_sled::SledDb::open(&db_path)?);
 
-        let streamer = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone())) as Arc<dyn nitro_inbox::streamer::Streamer>;
+        let streamer_impl = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone()));
+        let streamer_trait = streamer_impl.clone() as Arc<dyn nitro_inbox::streamer::Streamer>;
 
-        let tracker = Arc::new(nitro_inbox::tracker::InboxTracker::new(db.clone(), streamer.clone()));
+        let tracker = Arc::new(nitro_inbox::tracker::InboxTracker::new(db.clone(), streamer_trait.clone()));
         tracker.initialize()?;
 
 
@@ -62,14 +63,15 @@ impl NitroNode {
             reader_config.clone(),
         );
 
-        let streamer = nitro_streamer::streamer::TransactionStreamer::new(db.clone());
+        let streamer_task = tokio::spawn({
+            let streamer_impl = streamer_impl.clone();
+            async move {
+                let _ = streamer_impl.start().await;
+            }
+        });
 
         let reader_task = tokio::spawn(async move {
             let _ = inbox_reader.start().await;
-        });
-
-        let streamer_task = tokio::spawn(async move {
-            let _ = streamer.start().await;
         });
 
         let _ = tokio::join!(reader_task, streamer_task);
