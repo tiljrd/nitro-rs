@@ -207,6 +207,71 @@ impl<D: Database> TransactionStreamer<D> {
         }
         Ok((cur, false, None))
     }
+    fn add_messages_and_end_batch_impl(
+        &self,
+        mut first_msg_idx: u64,
+        messages_are_confirmed: bool,
+        mut messages: Vec<MessageWithMetadataAndBlockInfo>,
+        track_block_metadata_from: Option<u64>,
+    ) -> Result<()> {
+        let mut confirmed_reorg = false;
+        let mut old_msg: Option<MessageWithMetadata> = None;
+        let mut last_delayed_read: u64 = 0;
+
+        if messages_are_confirmed {
+            let mut _batch_for_writeback = self.db.new_batch();
+            let (num_dups, conf_reorg, old) =
+                self.count_duplicate_messages(first_msg_idx, &messages, Some(_batch_for_writeback.as_mut()))?;
+            confirmed_reorg = conf_reorg;
+            old_msg = old;
+            if num_dups > 0 {
+                last_delayed_read = messages[num_dups as usize - 1].message_with_meta.delayed_messages_read;
+                messages.drain(0..num_dups as usize);
+                first_msg_idx += num_dups;
+            }
+        } else {
+            let (num_dups, feed_reorg, old) = self.count_duplicate_messages(first_msg_idx, &messages, None)?;
+            old_msg = old;
+            if feed_reorg {
+                return Ok(());
+            }
+            if num_dups > 0 {
+                last_delayed_read = messages[num_dups as usize - 1].message_with_meta.delayed_messages_read;
+                messages.drain(0..num_dups as usize);
+                first_msg_idx += num_dups;
+            }
+        }
+
+        if last_delayed_read == 0 {
+            last_delayed_read = self.get_prev_prev_delayed_read(first_msg_idx)?;
+        }
+
+        for (i, msg) in messages.iter().enumerate() {
+            let msg_idx = first_msg_idx + i as u64;
+            let dm_read = msg.message_with_meta.delayed_messages_read;
+            let diff = dm_read.saturating_sub(last_delayed_read);
+            if diff != 0 && diff != 1 {
+                return Err(anyhow!(
+                    "attempted to insert jump from {} delayed messages read to {} delayed messages read at message index {}",
+                    last_delayed_read,
+                    dm_read,
+                    msg_idx
+                ));
+            }
+            last_delayed_read = dm_read;
+        }
+
+        if confirmed_reorg {
+            self.add_messages_and_reorg(first_msg_idx, &messages, track_block_metadata_from)?;
+            return Ok(());
+        }
+        if messages.is_empty() {
+            return Ok(());
+        }
+
+        self.write_messages(first_msg_idx, &messages, None, track_block_metadata_from)
+    }
+
 
     pub fn message_count(&self) -> Result<u64> {
         let data = self.db.get(MESSAGE_COUNT_KEY)?;
@@ -282,7 +347,26 @@ impl<D: Database> TransactionStreamer<D> {
         new_messages: &[MessageWithMetadataAndBlockInfo],
         track_block_metadata_from: Option<u64>,
     ) -> Result<()> {
-        self.write_messages(first_msg_idx, new_messages, None, track_block_metadata_from)
+        self.add_messages_and_end_batch_impl(
+            first_msg_idx,
+            false,
+            new_messages.to_vec(),
+            track_block_metadata_from,
+        )
+    }
+
+    pub fn add_confirmed_messages_and_end_batch(
+        &self,
+        first_msg_idx: u64,
+        new_messages: &[MessageWithMetadataAndBlockInfo],
+        track_block_metadata_from: Option<u64>,
+    ) -> Result<()> {
+        self.add_messages_and_end_batch_impl(
+            first_msg_idx,
+            true,
+            new_messages.to_vec(),
+            track_block_metadata_from,
+        )
     }
 
     pub fn get_head_message_index(&self) -> Result<u64> {
