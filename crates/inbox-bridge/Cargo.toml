@@ -1,0 +1,16 @@
+[package]
+name = "inbox-bridge"
+version = "0.1.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+async-trait = { workspace = true }
+alloy-primitives = { workspace = true }
+nitro-primitives = { path = "../primitives", version = "0.1.1" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+reqwest = { version = "0.12", features = ["json", "gzip", "brotli", "deflate"] }
+hex = "0.4"

@@ -1,0 +1,17 @@
+[package]
+name = "nitro-inbox"
+version = "0.1.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = { workspace = true }
+tracing = { workspace = true }
+alloy-primitives = { workspace = true }
+alloy-rlp = { workspace = true }
+arb-alloy-util = { workspace = true }
+lru = { workspace = true }
+brotli = "3"
+
+nitro-primitives = { path = "../primitives" }
+inbox-bridge = { path = "../inbox-bridge" }

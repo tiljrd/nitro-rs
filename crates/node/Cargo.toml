@@ -1,0 +1,47 @@
+[package]
+name = "nitro-node"
+version = "0.1.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+tokio = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+async-trait = "0.1"
+
+# Reth Arbitrum integration crates
+reth-arbitrum-node = { workspace = true }
+reth-arbitrum-evm = { workspace = true }
+reth-arbitrum-rpc = { workspace = true }
+reth-arbitrum-payload = { workspace = true }
+reth-arbitrum-primitives = { workspace = true }
+reth-arbitrum-chainspec = { workspace = true }
+
+# Reth node builder/core/api/payload handles used by engine adapter and service
+reth-node-builder = { workspace = true, features = ["test-utils"] }
+reth-node-core = { workspace = true }
+reth-node-api = { workspace = true }
+reth-payload-builder = { workspace = true }
+reth-payload-primitives = { workspace = true }
+reth-tasks = { workspace = true }
+
+# Use reth's engine primitives for PayloadAttributes to avoid version conflicts.
+reth-ethereum-engine-primitives = { workspace = true }
+
+alloy-primitives = { workspace = true }
+alloy-rlp = { workspace = true }
+
+# Nitro-rs crates
+nitro-inbox = { path = "../inbox" }
+nitro-inbox-reader = { path = "../inbox-reader" }
+nitro-streamer = { path = "../streamer" }
+nitro-batch-poster = { path = "../batch-poster" }
+nitro-validator = { path = "../validator" }
+nitro-rpc = { path = "../rpc" }
+nitro-primitives = { path = "../primitives" }
+nitro-db-sled = { path = "../db-sled" }
+inbox-bridge = { path = "../inbox-bridge" }
