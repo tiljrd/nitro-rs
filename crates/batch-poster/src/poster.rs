@@ -4,6 +4,11 @@ use tokio::time::{interval, Duration};
 use tracing::info;
 use alloy_primitives::{Address, B256, U256};
 use arb_alloy_util::l1_pricing::L1PricingState;
+use alloy_provider::{Provider, ProviderBuilder};
+use alloy_signer_local::PrivateKeySigner;
+use alloy_sol_types::{sol, SolCall};
+use std::str::FromStr;
+use alloy_rpc_types::TransactionRequest;
 
 #[derive(Clone, Default)]
 pub struct BatchPosterConfig {
@@ -41,8 +46,39 @@ impl BatchPoster {
         pricing.poster_data_cost_estimate_from_len(brotli_len as u64)
     }
 
-    async fn post_to_l1(&self, _data: &[u8]) -> Result<B256> {
-        Ok(B256::ZERO)
+    async fn post_to_l1(&self, data: &[u8]) -> Result<B256> {
+        let key_hex = match &self.cfg.poster_private_key_hex {
+            Some(k) => k.clone(),
+            None => return Ok(B256::ZERO),
+        };
+        let signer = PrivateKeySigner::from_str(&key_hex)?;
+        let provider = ProviderBuilder::new()
+            .wallet(signer)
+            .connect_http(self.cfg.l1_rpc_url.parse()?);
+
+        sol! {
+            interface ISequencerInbox {
+                function addSequencerL2BatchFromOrigin(uint256, uint256, bytes) external;
+            }
+        }
+
+        let sequence_number = U256::ZERO;
+        let gas_refunder = U256::ZERO;
+        let calldata = ISequencerInbox::addSequencerL2BatchFromOriginCall {
+            _0: sequence_number,
+            _1: gas_refunder,
+            _2: data.to_vec(),
+        }
+        .abi_encode();
+
+        let mut tx = TransactionRequest::default();
+        tx.to = Some(self.cfg.sequencer_inbox.into());
+        tx.input = calldata.into();
+        tx.value = Some(U256::ZERO);
+
+        let pending = provider.send_transaction(tx).await?;
+        let tx_hash = pending.tx_hash();
+        Ok(*tx_hash)
     }
 }
 
