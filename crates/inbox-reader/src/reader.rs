@@ -131,6 +131,13 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             return Ok(self.first_message_block);
         }
         let (_, _, parent_block) = self
+            .tracker
+            .get_delayed_message_accumulator_and_parent_chain_block_number(delayed_count - 1)?;
+        let msg_block = parent_block.max(self.first_message_block);
+        Ok(msg_block)
+    }
+}
+
 impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxReader<B1, B2, D> {
     fn get_prev_block_for_reorg(&self, from: u64, max_blocks_backwards: u64) -> Result<u64> {
         if from <= self.first_message_block {
@@ -138,12 +145,5 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
         }
         let new_from = from.saturating_sub(max_blocks_backwards).max(self.first_message_block);
         Ok(new_from)
-    }
-}
-
-            .tracker
-            .get_delayed_message_accumulator_and_parent_chain_block_number(delayed_count - 1)?;
-        let msg_block = parent_block.max(self.first_message_block);
-        Ok(msg_block)
     }
 }
