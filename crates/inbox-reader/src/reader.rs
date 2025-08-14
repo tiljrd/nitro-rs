@@ -130,7 +130,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
         if delayed_count == 0 {
             return Ok(self.first_message_block);
         }
-        let (_, parent_block) = self
+        let (_, _, parent_block) = self
 impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxReader<B1, B2, D> {
     fn get_prev_block_for_reorg(&self, from: u64, max_blocks_backwards: u64) -> Result<u64> {
         if from <= self.first_message_block {
