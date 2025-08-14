@@ -424,7 +424,7 @@ impl<D: Database> TransactionStreamer<D> {
 }
 impl<D: Database> Streamer for TransactionStreamer<D> {
     fn reorg_at_and_end_batch(&self, first_msg_idx_reorged: u64) -> Result<()> {
-        self.reorg_at_and_end_batch(first_msg_idx_reorged)
+        TransactionStreamer::reorg_at_and_end_batch(self, first_msg_idx_reorged)
     }
     fn add_messages_and_end_batch(
         &self,
@@ -432,7 +432,7 @@ impl<D: Database> Streamer for TransactionStreamer<D> {
         new_messages: &[MessageWithMetadataAndBlockInfo],
         track_block_metadata_from: Option<u64>,
     ) -> Result<()> {
-        self.add_messages_and_end_batch(first_msg_idx, new_messages, track_block_metadata_from)
+        TransactionStreamer::add_messages_and_end_batch(self, first_msg_idx, new_messages, track_block_metadata_from)
     }
     fn add_confirmed_messages_and_end_batch(
         &self,
@@ -440,6 +440,6 @@ impl<D: Database> Streamer for TransactionStreamer<D> {
         new_messages: &[MessageWithMetadataAndBlockInfo],
         track_block_metadata_from: Option<u64>,
     ) -> Result<()> {
-        self.add_confirmed_messages_and_end_batch(first_msg_idx, new_messages, track_block_metadata_from)
+        TransactionStreamer::add_confirmed_messages_and_end_batch(self, first_msg_idx, new_messages, track_block_metadata_from)
     }
 }
