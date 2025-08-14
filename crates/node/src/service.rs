@@ -180,7 +180,15 @@ impl NitroNode {
 
 
         let poster_task = if self.args.poster_enable {
-            let poster = nitro_batch_poster::poster::BatchPoster::new();
+            let poster_cfg = nitro_batch_poster::poster::BatchPosterConfig {
+                enabled: true,
+                use_4844: self.args.poster_4844_enable,
+                l1_rpc_url: l1_rpc.clone(),
+                sequencer_inbox: sequencer_inbox_addr,
+                parent_chain_bound: "latest".to_string(),
+                poster_private_key_hex: std::env::var("NITRO_L1_POSTER_KEY").ok(),
+            };
+            let poster = nitro_batch_poster::poster::BatchPoster::new(poster_cfg);
             Some(tokio::spawn(async move { let _ = poster.start().await; }))
         } else { None };
 
