@@ -12,6 +12,10 @@ use reth_node_api::BeaconConsensusEngineHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_arbitrum_node::ArbEngineTypes;
 use reth_arbitrum_payload::ArbPayloadTypes;
+use reth_payload_builder::EthPayloadBuilderAttributes;
+use alloy_primitives::{Address, B256};
+use alloy_rpc_types_engine::PayloadAttributes;
+
 
 type PayloadTy = ArbEngineTypes<ArbPayloadTypes>;
 
@@ -58,11 +62,72 @@ impl ExecEngine for RethExecEngine {
 
     async fn digest_message(
         &self,
-        _msg_idx: u64,
-        _msg: &MessageWithMetadata,
+        msg_idx: u64,
+        msg: &MessageWithMetadata,
         _msg_for_prefetch: Option<&MessageWithMetadata>,
     ) -> Result<MessageResult> {
-        anyhow::bail!("RethExecEngine::digest_message not implemented yet")
+        let beacon = self
+            .beacon_engine_handle
+            .as_ref()
+            .ok_or_else(|| anyhow!("missing beacon engine handle"))?;
+        let builder = self
+            .payload_builder_handle
+            .as_ref()
+            .ok_or_else(|| anyhow!("missing payload builder handle"))?;
+
+        if msg_idx == 0 {
+            return Err(anyhow!("cannot determine parent for first message index 0"));
+        }
+        let prev_key = db_key(MESSAGE_RESULT_PREFIX, msg_idx - 1);
+        let prev = {
+            let data = self.db.get(&prev_key)?;
+            let mut slice = data.as_slice();
+            MessageResult::decode(&mut slice)
+                .map_err(|e| anyhow!("failed to decode prev MessageResult: {e}"))?
+        };
+        let parent_hash = prev.block_hash;
+
+        let rpc_attrs = PayloadAttributes {
+            timestamp: msg.message.header.timestamp,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: None,
+            parent_beacon_block_root: None,
+        };
+
+        let attrs = EthPayloadBuilderAttributes::try_new(parent_hash, rpc_attrs, 2)
+            .map_err(|_e| anyhow!("failed to construct builder attributes"))?;
+        let id = builder
+            .send_new_payload(attrs)
+            .await
+            .map_err(|_| anyhow!("failed to get payload id"))??;
+
+        let built = builder
+            .resolve(id)
+            .await
+            .ok_or_else(|| anyhow!("payload resolve channel closed"))??;
+
+        let sealed = built.clone().into_sealed_block();
+        let exec_data =
+            <ArbPayloadTypes as reth_payload_primitives::PayloadTypes>::block_to_payload(sealed);
+
+        let _status = beacon
+            .new_payload(&exec_data)
+            .await
+            .map_err(|e| anyhow!("engine new_payload error: {e}"))?;
+
+        let block_hash = built.block().hash();
+        let header = built.block().header();
+        let send_root = {
+            let bytes = header.extra_data.as_ref();
+            if bytes.len() >= 32 {
+                B256::from_slice(&bytes[..32])
+            } else {
+                B256::ZERO
+            }
+        };
+
+        Ok(MessageResult { block_hash, send_root })
     }
 
     async fn result_at_message_index(&self, msg_idx: u64) -> Result<MessageResult> {
