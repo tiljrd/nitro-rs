@@ -84,12 +84,24 @@ impl NitroNode {
         let mut l1_rpc = std::env::var("NITRO_L1_RPC").unwrap_or_else(|_| "http://localhost:8545".to_string());
         let mut delayed_bridge_addr_opt: Option<Address> = None;
         let mut sequencer_inbox_addr_opt: Option<Address> = None;
+        let mut poster_enable_cfg = self.args.poster_enable;
+        let mut parent_chain_bound_cfg: Option<String> = None;
+        let mut poster_privkey_cfg: Option<String> = std::env::var("NITRO_L1_POSTER_KEY").ok();
 
         if let Some(conf_path) = self.args.conf_file.clone() {
             if let Ok(text) = std::fs::read_to_string(&conf_path) {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
                     if let Some(url) = v.pointer("/parent-chain/connection/url").and_then(|x| x.as_str()) {
                         l1_rpc = url.to_string();
+                    }
+                    if let Some(b) = v.pointer("/node/batch-poster/enable").and_then(|x| x.as_bool()) {
+                        poster_enable_cfg = b;
+                    }
+                    if let Some(s) = v.pointer("/node/batch-poster/l1-block-bound").and_then(|x| x.as_str()) {
+                        parent_chain_bound_cfg = Some(s.to_string());
+                    }
+                    if let Some(k) = v.pointer("/node/batch-poster/parent-chain-wallet/private-key").and_then(|x| x.as_str()) {
+                        poster_privkey_cfg = Some(k.to_string());
                     }
                     let info_files = v.pointer("/chain/info-files").and_then(|x| x.as_array()).cloned().unwrap_or_default();
                     if let Some(info_path_val) = info_files.get(0).and_then(|x| x.as_str()) {
@@ -182,14 +194,14 @@ impl NitroNode {
         });
 
 
-        let poster_task = if self.args.poster_enable {
+        let poster_task = if poster_enable_cfg {
             let poster_cfg = nitro_batch_poster::poster::BatchPosterConfig {
                 enabled: true,
                 use_4844: self.args.poster_4844_enable,
                 l1_rpc_url: l1_rpc.clone(),
                 sequencer_inbox: sequencer_inbox_addr,
-                parent_chain_bound: "latest".to_string(),
-                poster_private_key_hex: std::env::var("NITRO_L1_POSTER_KEY").ok(),
+                parent_chain_bound: parent_chain_bound_cfg.unwrap_or_else(|| "latest".to_string()),
+                poster_private_key_hex: poster_privkey_cfg,
             };
             let delayed_fn = {
                 let tracker = tracker.clone();
