@@ -205,6 +205,32 @@ impl<D: Database> TransactionStreamer<D> {
             block_metadata,
         })
     }
+    pub fn reorg_at_and_end_batch(&self, first_msg_idx_reorged: u64) -> Result<()> {
+        self.add_messages_and_reorg(first_msg_idx_reorged, &[], None)
+    }
+
+    pub fn add_messages_and_end_batch(
+        &self,
+        first_msg_idx: u64,
+        new_messages: &[MessageWithMetadataAndBlockInfo],
+        track_block_metadata_from: Option<u64>,
+    ) -> Result<()> {
+        self.write_messages(first_msg_idx, new_messages, None, track_block_metadata_from)
+    }
+
+    pub fn get_head_message_index(&self) -> Result<u64> {
+        let count = self.message_count()?;
+        if count == 0 {
+            Ok(0)
+        } else {
+            Ok(count - 1)
+        }
+    }
+
+    pub fn get_message_count(&self) -> Result<u64> {
+        self.message_count()
+    }
+
 
 
 }
