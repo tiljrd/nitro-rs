@@ -8,8 +8,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Prepare workspace and clone external path dependencies expected by Cargo.toml
 WORKDIR /
-RUN git clone --depth=1 https://github.com/tiljrd/arb-alloy.git && \
-    git clone --depth=1 https://github.com/tiljrd/reth.git
+# arb-alloy main is fine
+RUN git clone --depth=1 https://github.com/tiljrd/arb-alloy.git
+# Pin reth to the PR branch that fixes the inner attribute issue in arbitrum/evm
+RUN git clone --depth=1 --branch devin/1755179801-arbitrum-evm-attr-fix https://github.com/tiljrd/reth.git
 
 # Copy the nitro-rs source
 WORKDIR /app
@@ -19,6 +21,7 @@ COPY . .
 RUN cargo build --release -p arb-nitro-rs
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+# Install runtime deps (OpenSSL runtime for libssl.so.3)
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/arb-nitro-rs /usr/local/bin/arb-nitro-rs
 ENTRYPOINT ["/usr/local/bin/arb-nitro-rs"]
