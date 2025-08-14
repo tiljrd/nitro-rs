@@ -22,7 +22,8 @@ impl NitroNode {
         let db_path = std::env::var("NITRO_DB_PATH").unwrap_or_else(|_| "./nitro-db".to_string());
         let db = Arc::new(nitro_db_sled::SledDb::open(&db_path)?);
 
-        let streamer_impl = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone()));
+        let exec = crate::engine_adapter::RethExecEngine::new();
+        let streamer_impl = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone(), exec));
         let streamer_trait = streamer_impl.clone() as Arc<dyn nitro_inbox::streamer::Streamer>;
 
         let tracker = Arc::new(nitro_inbox::tracker::InboxTracker::new(db.clone(), streamer_trait.clone()));
