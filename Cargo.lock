@@ -4641,6 +4641,7 @@ name = "nitro-inbox-reader"
 version = "0.1.1"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "anyhow",
  "async-trait",
  "inbox-bridge",
