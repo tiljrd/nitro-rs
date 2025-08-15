@@ -154,13 +154,14 @@ impl DelayedBridge for EthDelayedBridge {
             if lg.topics.len() < 2 || data_bytes.len() < 32 * 5 {
                 continue;
             }
-            let message_index = U256::from_be_bytes(B256::from_str(&lg.topics[1]).unwrap_or_default().0).to::<u64>();
+            let msg_index_b256 = B256::from_str(&lg.topics[1]).unwrap_or_default();
+            let message_index = U256::from_be_bytes(msg_index_b256.0).to::<u64>();
             let before_acc = B256::from_str(&lg.topics[2]).unwrap_or_default();
 
             let inbox_addr = Address::from_slice(&data_bytes[12..32]);
             let kind = u8::try_from(Self::decode_u256_word(&data_bytes[32..64])?.to::<u64>()).unwrap_or(0);
             let sender = Address::from_slice(&data_bytes[64 + 12..64 + 32]);
-            let message_data_hash = B256::from_slice(&data_bytes[96..128]);
+            let _message_data_hash = B256::from_slice(&data_bytes[96..128]);
             let basefee = Self::decode_u256_word(&data_bytes[128..160])?;
             let timestamp = Self::decode_u256_word(&data_bytes[160..192])?.to::<u64>();
 
@@ -172,7 +173,7 @@ impl DelayedBridge for EthDelayedBridge {
                 poster: sender,
                 block_number,
                 timestamp,
-                request_id: Some(message_data_hash),
+                request_id: Some(msg_index_b256),
                 l1_base_fee: basefee,
             };
             let msg = nitro_primitives::l1::L1IncomingMessage { header, l2msg: Vec::new(), batch_gas_cost: None };
@@ -184,8 +185,8 @@ impl DelayedBridge for EthDelayedBridge {
                 parent_chain_block_number: block_number,
             };
             inbox_addresses.insert(inbox_addr);
-            message_ids.push(message_data_hash);
-            parsed.push((dim, inbox_addr, message_data_hash));
+            message_ids.push(msg_index_b256);
+            parsed.push((dim, inbox_addr, msg_index_b256));
         }
 
         if parsed.is_empty() {
