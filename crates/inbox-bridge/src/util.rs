@@ -20,6 +20,22 @@ pub async fn proxy_admin_address(rpc: &RpcClient, proxy: Address) -> Result<Addr
     addr.copy_from_slice(&bytes[12..32]);
     Ok(Address::from(addr))
 }
+pub async fn proxy_impl_address(rpc: &RpcClient, proxy: Address) -> Result<Address> {
+    let slot_impl = B256::from_slice(&hex::decode("360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc").unwrap());
+    let params = json!([
+        format!("{:#x}", proxy),
+        format!("{:#066x}", slot_impl),
+        "latest"
+    ]);
+    let storage: String = rpc.call("eth_getStorageAt", params).await?;
+    let bytes = hex::decode(storage.trim_start_matches("0x"))?;
+    if bytes.len() < 32 {
+        anyhow::bail!("short storage for proxy impl slot")
+    }
+    let mut addr = [0u8; 20];
+    addr.copy_from_slice(&bytes[12..32]);
+    Ok(Address::from(addr))
+}
 
 pub async fn safe_from_for_proxy(rpc: &RpcClient, proxy: Address) -> Result<String> {
     let admin = proxy_admin_address(rpc, proxy).await.unwrap_or(Address::ZERO);

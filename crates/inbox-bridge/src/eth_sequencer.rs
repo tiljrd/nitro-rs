@@ -68,13 +68,22 @@ impl SequencerInbox for EthSequencerInbox {
         let to_hex = format!("{:#x}", self.inbox_addr);
         let from_hex = safe_from_for_proxy(&self.rpc, self.inbox_addr).await?;
         let res_hex: String = self.rpc.call("eth_call", json!([{
-            "to": to_hex,
+            "to": to_hex.clone(),
             "from": from_hex,
-            "data": format!("0x{}", hex::encode(data)),
+            "data": format!("0x{}", hex::encode(&data)),
         }, "latest"])).await?;
-        let res = hex::decode(res_hex.trim_start_matches("0x"))?;
+        let mut res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
-            anyhow::bail!("short returndata for batchCount")
+            let impl_addr = crate::util::proxy_impl_address(&self.rpc, self.inbox_addr).await?;
+            let impl_hex = format!("{:#x}", impl_addr);
+            let res2_hex: String = self.rpc.call("eth_call", json!([{
+                "to": impl_hex,
+                "data": format!("0x{}", hex::encode(&data)),
+            }, "latest"])).await?;
+            res = hex::decode(res2_hex.trim_start_matches("0x"))?;
+            if res.len() < 32 {
+                anyhow::bail!("short returndata for batchCount")
+            }
         }
         let count = Self::decode_u256_word(&res[0..32])?;
         Ok(count.try_into().map_err(|_| anyhow::anyhow!("count overflow"))?)
@@ -88,13 +97,22 @@ impl SequencerInbox for EthSequencerInbox {
         let to_hex = format!("{:#x}", self.inbox_addr);
         let from_hex = safe_from_for_proxy(&self.rpc, self.inbox_addr).await?;
         let res_hex: String = self.rpc.call("eth_call", json!([{
-            "to": to_hex,
+            "to": to_hex.clone(),
             "from": from_hex,
-            "data": format!("0x{}", hex::encode(data)),
+            "data": format!("0x{}", hex::encode(&data)),
         }, "latest"])).await?;
-        let res = hex::decode(res_hex.trim_start_matches("0x"))?;
+        let mut res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
-            anyhow::bail!("short returndata for inboxAccs")
+            let impl_addr = crate::util::proxy_impl_address(&self.rpc, self.inbox_addr).await?;
+            let impl_hex = format!("{:#x}", impl_addr);
+            let res2_hex: String = self.rpc.call("eth_call", json!([{
+                "to": impl_hex,
+                "data": format!("0x{}", hex::encode(&data)),
+            }, "latest"])).await?;
+            res = hex::decode(res2_hex.trim_start_matches("0x"))?;
+            if res.len() < 32 {
+                anyhow::bail!("short returndata for inboxAccs")
+            }
         }
         Ok(Self::decode_b256_word(&res[0..32])?)
     }
