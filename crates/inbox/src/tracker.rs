@@ -5,7 +5,7 @@ use alloy_primitives::B256;
 use alloy_rlp::Decodable;
 use nitro_primitives::dbkeys::*;
 use nitro_primitives::accumulator::hash_after;
-use nitro_primitives::l1::{L1IncomingMessage, parse_incoming_l1_message_legacy, serialize_incoming_l1_message_legacy};
+use nitro_primitives::l1::{L1IncomingMessage, parse_incoming_l1_message_legacy, serialize_incoming_l1_message_legacy, delayed_message_body_hash};
 use nitro_primitives::message::MessageWithMetadataAndBlockInfo;
 use inbox_bridge::types::SequencerInboxBatch;
 use std::sync::{Arc, Mutex};
@@ -67,8 +67,9 @@ impl<D: Database> InboxTracker<D> {
                 anyhow::bail!("delayed message entry missing accumulator");
             }
             let prev = B256::from_slice(&data[..32]);
-            let msg_bytes = &data[32..];
-            return Ok(hash_after(prev, msg_bytes));
+            let msg = parse_incoming_l1_message_legacy(&data[32..])?;
+            let body_hash = delayed_message_body_hash(&msg);
+            return Ok(hash_after(prev, body_hash.as_slice()));
         }
         let legacy_key = db_key(LEGACY_DELAYED_MESSAGE_PREFIX, seqnum);
         if self.db.has(&legacy_key)? {
@@ -78,8 +79,8 @@ impl<D: Database> InboxTracker<D> {
             }
             let prev = B256::from_slice(&data[..32]);
             let msg = parse_incoming_l1_message_legacy(&data[32..])?;
-            let ser = serialize_incoming_l1_message_legacy(&msg)?;
-            return Ok(hash_after(prev, &ser));
+            let body_hash = delayed_message_body_hash(&msg);
+            return Ok(hash_after(prev, body_hash.as_slice()));
         }
         anyhow::bail!("accumulator not found: delayed {}", seqnum)
     }
@@ -378,7 +379,9 @@ impl<D: Database> InboxTracker<D> {
             data.extend_from_slice(msg_bytes);
             let key = db_key(RLP_DELAYED_MESSAGE_PREFIX, *seqnum);
             batch.put(&key, &data)?;
-            next_acc = hash_after(next_acc, msg_bytes);
+            let msg = parse_incoming_l1_message_legacy(msg_bytes)?;
+            let body_hash = delayed_message_body_hash(&msg);
+            next_acc = hash_after(next_acc, body_hash.as_slice());
             pos += 1;
         }
         self.set_delayed_count_reorg_and_write_batch(batch.as_mut(), first_pos, pos, true)?;

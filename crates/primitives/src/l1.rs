@@ -137,6 +137,36 @@ impl Decodable for L1IncomingMessage {
         Ok(Self { header, l2msg, batch_gas_cost })
     }
 }
+use alloy_primitives::keccak256;
+
+fn u64_min_be_bytes(n: u64) -> Vec<u8> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let be = n.to_be_bytes();
+    let mut i = 0usize;
+    while i < be.len() && be[i] == 0 {
+        i += 1;
+    }
+    be[i..].to_vec()
+}
+
+pub fn delayed_message_body_hash(msg: &L1IncomingMessage) -> B256 {
+    let mut buf: Vec<u8> = Vec::new();
+    buf.push(msg.header.kind);
+    buf.extend_from_slice(msg.header.poster.as_slice());
+    buf.extend_from_slice(&u64_min_be_bytes(msg.header.block_number));
+    buf.extend_from_slice(&u64_min_be_bytes(msg.header.timestamp));
+    if let Some(req) = msg.header.request_id {
+        buf.extend_from_slice(req.as_slice());
+    } else {
+    }
+    buf.extend_from_slice(&msg.header.l1_base_fee.to_be_bytes::<32>());
+    let l2_hash = keccak256(&msg.l2msg);
+    buf.extend_from_slice(l2_hash.as_slice());
+    B256::from(keccak256(&buf))
+}
+
 
 
 fn read_exact<const N: usize>(r: &mut Cursor<&[u8]>) -> anyhow::Result<[u8; N]> {
