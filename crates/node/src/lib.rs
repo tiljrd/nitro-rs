@@ -1,3 +1,4 @@
+pub mod addresses;
 pub mod segment_source;
 pub mod config;
 pub mod service;

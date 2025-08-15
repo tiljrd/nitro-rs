@@ -3628,6 +3628,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4667,6 +4668,7 @@ dependencies = [
 name = "nitro-node"
 version = "0.1.1"
 dependencies = [
+ "alloy-chains",
  "alloy-primitives",
  "alloy-rlp",
  "anyhow",
@@ -4687,6 +4689,7 @@ dependencies = [
  "reth-arbitrum-payload",
  "reth-arbitrum-primitives",
  "reth-arbitrum-rpc",
+ "reth-chainspec",
  "reth-ethereum-engine-primitives",
  "reth-node-api",
  "reth-node-builder",
@@ -5897,9 +5900,10 @@ checksum = "95325155c684b1c89f7765e30bc1c42e4a6da51ca513615660cb8a62ef9a88e3"
 name = "reth-arbitrum-chainspec"
 version = "0.1.0"
 dependencies = [
- "alloy-evm",
- "alloy-primitives",
+ "alloy-chains",
+ "eyre",
  "reth-chainspec",
+ "reth-cli",
  "revm",
 ]
 
@@ -6157,6 +6161,28 @@ dependencies = [
  "reth-network-peers",
  "reth-primitives-traits",
  "serde_json",
+]
+
+[[package]]
+name = "reth-cli"
+version = "1.6.0"
+dependencies = [
+ "alloy-genesis",
+ "clap",
+ "eyre",
+ "reth-cli-runner",
+ "reth-db",
+ "serde_json",
+ "shellexpand",
+]
+
+[[package]]
+name = "reth-cli-runner"
+version = "1.6.0"
+dependencies = [
+ "reth-tasks",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

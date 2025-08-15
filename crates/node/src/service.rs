@@ -18,7 +18,7 @@ use reth_node_core::args::NetworkArgs;
 use reth_node_builder::NodeBuilder;
 use reth_arbitrum_node::{ArbNode, args::RollupArgs};
 use reth_tasks::TaskManager;
-mod addresses;
+use crate::addresses;
 
 pub struct NitroNode {
     pub args: NodeArgs,
