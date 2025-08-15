@@ -4672,6 +4672,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types-engine",
  "anyhow",
  "async-trait",
  "clap",

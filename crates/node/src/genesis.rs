@@ -155,16 +155,39 @@ impl GenesisBootstrap {
         HR: inbox_bridge::traits::L1HeaderReader + Send + Sync + ?Sized,
     {
         let from_block = deployed_at;
-        let latest =
-            header_reader.latest_finalized_block_nr().await.unwrap_or(from_block + 10_000);
-        let to_block = std::cmp::min(latest, from_block.saturating_add(9_999));
+        let latest = if let Ok(n) = header_reader.latest_safe_block_nr().await {
+            n
+        } else if let Ok(n) = header_reader.latest_finalized_block_nr().await {
+            n
+        } else {
+            from_block + 100_000
+        };
+        tracing::info!(target: "genesis_bootstrap", "init scan configured: deployed_at={} latest={}", from_block, latest);
         let fetcher = |_bn: u64| -> anyhow::Result<Vec<u8>> { Ok(Vec::new()) };
-        let msgs = delayed_bridge.lookup_messages_in_range(from_block, to_block, fetcher).await?;
-        let init = msgs
-            .into_iter()
-            .find(|m| m.message.header.kind == 11u8)
-            .map(|m| m.message);
-        let Some(init_msg) = init else { return Ok(None); };
+
+        let mut init_msg_opt: Option<nitro_primitives::l1::L1IncomingMessage> = None;
+        let mut start = from_block;
+        while start <= latest {
+            let end = start.saturating_add(9_999).min(latest);
+            tracing::info!(target: "genesis_bootstrap", "scanning for init message: from={} to={}", start, end);
+            let msgs = delayed_bridge.lookup_messages_in_range(start, end, fetcher).await?;
+            tracing::info!(target: "genesis_bootstrap", "window {}-{} yielded {} delayed messages", start, end, msgs.len());
+            if !msgs.is_empty() {
+                let kinds: Vec<u8> = msgs.iter().map(|m| m.message.header.kind).collect();
+                tracing::info!(target: "genesis_bootstrap", "found {} delayed messages in window; kinds={:?}", msgs.len(), kinds);
+                if let Some(found) = msgs.into_iter().find(|m| m.message.header.kind == 11u8) {
+                    tracing::info!(target: "genesis_bootstrap", "found init message (kind=11) in window {}-{}", start, end);
+                    init_msg_opt = Some(found.message);
+                    break;
+                }
+            }
+            if end == latest {
+                break;
+            }
+            start = end.saturating_add(1);
+        }
+
+        let Some(init_msg) = init_msg_opt else { return Ok(None); };
         let parsed = nitro_primitives::l1::parse_init_message(&init_msg)?;
 
         let chain_id = parsed.chain_id_u64().unwrap_or(421_614u64);

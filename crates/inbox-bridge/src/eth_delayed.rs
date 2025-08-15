@@ -152,6 +152,7 @@ impl DelayedBridge for EthDelayedBridge {
             "topics": [[format!("{:#x}", message_delivered_topic)]],
         });
         let logs: Vec<RpcLog> = self.rpc.call("eth_getLogs", json!([filter])).await?;
+        tracing::info!(target: "eth_delayed", "MessageDelivered logs fetched addr={} from={} to={} count={}", format!("{:#x}", self.bridge_addr), from_block, to_block, logs.len());
 
         let mut inbox_addresses: BTreeSet<Address> = BTreeSet::new();
         let mut message_ids: Vec<B256> = Vec::with_capacity(logs.len());

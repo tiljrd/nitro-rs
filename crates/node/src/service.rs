@@ -169,6 +169,10 @@ impl NitroNode {
             Some("local") => 1337u64,
             Some(_) => 421_614u64,
         };
+        let beacon_url_opt = self.args.beacon_url.clone().or_else(|| std::env::var("NITRO_BEACON_URL").ok());
+        let secondary_beacon_url_opt = self.args.secondary_beacon_url.clone().or_else(|| std::env::var("NITRO_BEACON_URL_SECONDARY").ok());
+        let beacon_auth_opt = self.args.beacon_authorization.clone().or_else(|| std::env::var("NITRO_BEACON_AUTH").ok());
+        let beacon_blob_dir_opt = self.args.beacon_blob_directory.clone().or_else(|| std::env::var("NITRO_BEACON_BLOB_DIR").ok());
 
         let chains = if let Some(path) = self.args.chaininfo_file.as_deref() {
             let text = std::fs::read_to_string(path)?;
@@ -199,11 +203,19 @@ impl NitroNode {
             header_reader.as_ref(),
             json_deployed_at,
         ).await? {
+            let gh = spec.genesis_hash();
+            tracing::info!("computed L2 genesis hash from init message: {gh:?}, chain_id={}", spec.chain.id());
             spec
         } else {
             return Err(anyhow::anyhow!("init message not found in L1 range; refusing to fall back to static chainspec"));
         };
+        if let Some(url) = &beacon_url_opt {
+            tracing::info!("beacon client configured: url={}", url);
+        } else {
+            tracing::warn!("no beacon-url configured; blob-sidecar fetching may fail for 4844 batches");
+        }
         let net = NetworkArgs::default().with_unused_ports();
+        let genesis_hash = spec.genesis_hash();
         let arb_cfg = NodeConfig::new(Arc::new(spec))
             .with_network(net)
             .with_rpc(rpc);
@@ -219,7 +231,7 @@ impl NitroNode {
         let beacon_handle = arb_handle.node.add_ons_handle.beacon_engine_handle.clone();
         let payload_handle = arb_handle.node.payload_builder_handle.clone();
 
-        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(db.clone(), beacon_handle, payload_handle);
+        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(db.clone(), beacon_handle, payload_handle, genesis_hash);
         let streamer_impl = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone(), exec));
         let streamer_trait = streamer_impl.clone() as Arc<dyn nitro_inbox::streamer::Streamer>;
 

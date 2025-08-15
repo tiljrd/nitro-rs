@@ -52,4 +52,15 @@ pub struct NodeArgs {
 
     #[arg(long, env = "NITRO_VALIDATOR_ENABLE", default_value_t = false)]
     pub validator_enable: bool,
+    #[arg(long = "beacon-url", env = "NITRO_BEACON_URL")]
+    pub beacon_url: Option<String>,
+
+    #[arg(long = "secondary-beacon-url", env = "NITRO_BEACON_URL_SECONDARY")]
+    pub secondary_beacon_url: Option<String>,
+
+    #[arg(long = "beacon-authorization", env = "NITRO_BEACON_AUTH")]
+    pub beacon_authorization: Option<String>,
+
+    #[arg(long = "beacon-blob-directory", env = "NITRO_BEACON_BLOB_DIR")]
+    pub beacon_blob_directory: Option<String>,
 }

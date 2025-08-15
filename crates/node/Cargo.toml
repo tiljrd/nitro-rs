@@ -50,3 +50,4 @@ nitro-rpc = { path = "../rpc" }
 nitro-primitives = { path = "../primitives" }
 nitro-db-sled = { path = "../db-sled" }
 inbox-bridge = { path = "../inbox-bridge" }
+alloy-rpc-types-engine = "1.0.24"
