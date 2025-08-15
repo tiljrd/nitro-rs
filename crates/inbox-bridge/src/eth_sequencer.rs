@@ -301,6 +301,7 @@ impl SequencerInbox for EthSequencerInbox {
             .and_then(|h| B256::from_str(h).ok())
             .unwrap_or_default();
         Ok((batch_bytes, block_hash, Vec::new()))
+    }
     async fn get_tx_input_and_blobs(&self, tx_hash: B256) -> anyhow::Result<(Vec<u8>, Vec<B256>)> {
         let tx_hex = format!("{:#x}", tx_hash);
         let tx: RpcTx = self.rpc.call("eth_getTransactionByHash", json!([tx_hex])).await?;

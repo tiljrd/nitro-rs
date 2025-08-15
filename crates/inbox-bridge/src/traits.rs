@@ -29,6 +29,7 @@ pub trait SequencerInbox: Send + Sync {
         tx_hash: B256,
         block_hash: B256,
     ) -> anyhow::Result<(Vec<u8>, B256, Vec<u64>)>;
+    async fn get_tx_input_and_blobs(&self, tx_hash: B256) -> anyhow::Result<(Vec<u8>, Vec<B256>)>;
 }
 
 #[derive(Clone, Debug)]
