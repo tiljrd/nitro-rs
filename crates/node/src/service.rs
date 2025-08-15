@@ -1,4 +1,3 @@
-use reth_arbitrum_chainspec::arbitrum_sepolia_spec;
 use anyhow::Result;
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 use std::str::FromStr;
@@ -9,7 +8,6 @@ use nitro_batch_poster::poster::PosterService;
 use nitro_validator::ValidatorService;
 
 use alloy_primitives::Address;
-use alloy_chains::Chain;
 
 use crate::config::NodeArgs;
 
@@ -203,7 +201,7 @@ impl NitroNode {
         ).await? {
             spec
         } else {
-            arbitrum_sepolia_spec()
+            return Err(anyhow::anyhow!("init message not found in L1 range; refusing to fall back to static chainspec"));
         };
         let net = NetworkArgs::default().with_unused_ports();
         let arb_cfg = NodeConfig::new(Arc::new(spec))
@@ -235,14 +233,6 @@ impl NitroNode {
 
         let tracker = Arc::new(nitro_inbox::tracker::InboxTracker::new(db.clone(), streamer_trait.clone()));
         tracker.initialize()?;
-        let _ = crate::genesis::GenesisBootstrap::seed_from_init_message(
-            db.as_ref(),
-            &chain_entry,
-            delayed_bridge.as_ref(),
-            sequencer_inbox.as_ref(),
-            header_reader.as_ref(),
-            json_deployed_at,
-        ).await?;
 
         let first_msg_block: u64 = if let Some(v) = self.args.first_message_block {
             v

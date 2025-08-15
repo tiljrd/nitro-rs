@@ -40,6 +40,7 @@ alloy-primitives = { workspace = true }
 alloy-rlp = { workspace = true }
 
 # Nitro-rs crates
+alloy-genesis = { workspace = true }
 nitro-inbox = { path = "../inbox" }
 nitro-inbox-reader = { path = "../inbox-reader" }
 nitro-streamer = { path = "../streamer" }
