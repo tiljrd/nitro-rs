@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::str::FromStr;
 use std::sync::Arc;
+use tracing::info;
 
 #[derive(Deserialize)]
 struct RpcLog {
@@ -28,21 +29,6 @@ impl EthSequencerInbox {
     pub async fn new_http(rpc_url: &str, inbox_addr: Address) -> anyhow::Result<Self> {
         let rpc = Arc::new(RpcClient::new(rpc_url.to_string()));
         Ok(Self { rpc, inbox_addr })
-    }
-    async fn get_bridge_addr_at_block(&self, block_number: u64) -> anyhow::Result<Address> {
-        let mut data = Vec::with_capacity(4);
-        data.extend_from_slice(&Self::encode_selector("bridge()"));
-        let to_hex = format!("{:#x}", self.inbox_addr);
-        let block_tag = format!("0x{:x}", block_number);
-        let res_hex: String = self.rpc.call("eth_call", json!([{
-            "to": to_hex,
-            "data": format!("0x{}", hex::encode(data)),
-        }, block_tag])).await?;
-        let res = hex::decode(res_hex.trim_start_matches("0x"))?;
-        if res.len() < 32 {
-            anyhow::bail!("short returndata for bridge()");
-        }
-        Ok(Address::from_slice(&res[12..32]))
     }
 
     fn encode_selector(sig: &str) -> [u8; 4] {
@@ -72,10 +58,10 @@ impl EthSequencerInbox {
 #[async_trait]
 impl SequencerInbox for EthSequencerInbox {
     async fn get_batch_count(&self, block_number: u64) -> anyhow::Result<u64> {
-        let bridge_addr = self.get_bridge_addr_at_block(block_number).await?;
+        info!("eth_sequencer: get_batch_count at block {}", block_number);
         let mut data = Vec::with_capacity(4);
-        data.extend_from_slice(&Self::encode_selector("sequencerMessageCount()"));
-        let to_hex = format!("{:#x}", bridge_addr);
+        data.extend_from_slice(&Self::encode_selector("batchCount()"));
+        let to_hex = format!("{:#x}", self.inbox_addr);
         let block_tag = format!("0x{:x}", block_number);
         let res_hex: String = self.rpc.call("eth_call", json!([{
             "to": to_hex,
@@ -83,18 +69,18 @@ impl SequencerInbox for EthSequencerInbox {
         }, block_tag])).await?;
         let res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
-            anyhow::bail!("short returndata for sequencerMessageCount")
+            anyhow::bail!("short returndata for batchCount")
         }
         let count = Self::decode_u256_word(&res[0..32])?;
         Ok(count.try_into().map_err(|_| anyhow::anyhow!("count overflow"))?)
     }
 
     async fn get_accumulator(&self, seq_num: u64, block_number: u64) -> anyhow::Result<B256> {
-        let bridge_addr = self.get_bridge_addr_at_block(block_number).await?;
+        info!("eth_sequencer: get_accumulator seq={} block={}", seq_num, block_number);
         let mut data = Vec::with_capacity(4 + 32);
-        data.extend_from_slice(&Self::encode_selector("sequencerInboxAccs(uint256)"));
+        data.extend_from_slice(&Self::encode_selector("inboxAccs(uint256)"));
         data.extend_from_slice(&Self::encode_u256(U256::from(seq_num)));
-        let to_hex = format!("{:#x}", bridge_addr);
+        let to_hex = format!("{:#x}", self.inbox_addr);
         let block_tag = format!("0x{:x}", block_number);
         let res_hex: String = self.rpc.call("eth_call", json!([{
             "to": to_hex,
@@ -102,7 +88,7 @@ impl SequencerInbox for EthSequencerInbox {
         }, block_tag])).await?;
         let res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
-            anyhow::bail!("short returndata for sequencerInboxAccs")
+            anyhow::bail!("short returndata for inboxAccs")
         }
         Ok(Self::decode_b256_word(&res[0..32])?)
     }
@@ -118,8 +104,11 @@ impl SequencerInbox for EthSequencerInbox {
             "address": format!("{:#x}", self.inbox_addr),
             "topics": [[format!("{:#x}", topic0)]],
         });
+        info!("eth_sequencer: lookup_batches_in_range from={} to={}", from_block, to_block);
         let logs: Vec<RpcLog> = self.rpc.call("eth_getLogs", json!([filter])).await?;
+        
         let mut out = Vec::with_capacity(logs.len());
+        
         let mut last_seq: Option<u64> = None;
         for lg in logs {
             let data_bytes = hex::decode(lg.data.trim_start_matches("0x"))?;
@@ -169,6 +158,7 @@ impl SequencerInbox for EthSequencerInbox {
             };
             out.push(batch);
         }
+        info!("eth_sequencer: got {} SequencerBatchDelivered logs", out.len());
         Ok(out)
     }
 
