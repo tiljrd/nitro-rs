@@ -18,6 +18,7 @@ use reth_node_core::args::NetworkArgs;
 use reth_node_builder::NodeBuilder;
 use reth_arbitrum_node::{ArbNode, args::RollupArgs};
 use reth_tasks::TaskManager;
+mod addresses;
 
 pub struct NitroNode {
     pub args: NodeArgs,
@@ -195,12 +196,16 @@ impl NitroNode {
 
         let delayed_bridge_addr = if let Some(a) = delayed_bridge_addr_opt {
             a
+        } else if matches!(self.args.network.as_deref(), Some("sepolia") | None) {
+            Address::from_str(addresses::ARB_SEPOLIA.bridge)?
         } else {
             let delayed_bridge_addr_str = std::env::var("NITRO_DELAYED_BRIDGE")?;
             Address::from_str(delayed_bridge_addr_str.trim())?
         };
         let sequencer_inbox_addr = if let Some(a) = sequencer_inbox_addr_opt {
             a
+        } else if matches!(self.args.network.as_deref(), Some("sepolia") | None) {
+            Address::from_str(addresses::ARB_SEPOLIA.sequencer_inbox)?
         } else {
             let sequencer_inbox_addr_str = std::env::var("NITRO_SEQUENCER_INBOX")?;
             Address::from_str(sequencer_inbox_addr_str.trim())?
