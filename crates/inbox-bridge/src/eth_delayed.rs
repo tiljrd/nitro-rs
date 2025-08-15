@@ -171,17 +171,22 @@ impl DelayedBridge for EthDelayedBridge {
             let timestamp = Self::decode_u256_word(&data_bytes[160..192])?.to::<u64>();
 
             let block_hash = lg.blockHash.as_deref().and_then(|h| B256::from_str(h).ok()).unwrap_or_default();
-            let block_number = if let Some(bh) = lg.blockHash.as_deref() {
+            let parent_chain_block_number = lg
+                .blockNumber
+                .as_deref()
+                .and_then(|h| u64::from_str_radix(h.trim_start_matches("0x"), 16).ok())
+                .unwrap_or_default();
+            let l1_block_number = if let Some(bh) = lg.blockHash.as_deref() {
                 let blk: RpcBlock = self.rpc.call("eth_getBlockByHash", json!([bh, false])).await?;
                 u64::from_str_radix(blk.number.trim_start_matches("0x"), 16).unwrap_or_default()
             } else {
-                lg.blockNumber.as_deref().and_then(|h| u64::from_str_radix(h.trim_start_matches("0x"), 16).ok()).unwrap_or_default()
+                parent_chain_block_number
             };
 
             let header = nitro_primitives::l1::L1IncomingMessageHeader {
                 kind,
                 poster: sender,
-                block_number,
+                block_number: l1_block_number,
                 timestamp,
                 request_id: Some(msg_index_b256),
                 l1_base_fee: basefee,
@@ -192,7 +197,7 @@ impl DelayedBridge for EthDelayedBridge {
                 block_hash,
                 before_inbox_acc: before_acc,
                 message: msg,
-                parent_chain_block_number: block_number,
+                parent_chain_block_number,
             };
             inbox_addresses.insert(inbox_addr);
             message_ids.push(msg_index_b256);
