@@ -8,6 +8,7 @@ use alloy_primitives::{keccak256, Address, B256, U256};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
+use crate::util::safe_from_for_proxy;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::info;
@@ -65,12 +66,12 @@ impl SequencerInbox for EthSequencerInbox {
         let mut data = Vec::with_capacity(4);
         data.extend_from_slice(&Self::encode_selector(SIG_BATCH_COUNT));
         let to_hex = format!("{:#x}", self.inbox_addr);
-        let from_hex = "0x0000000000000000000000000000000000000001";
+        let from_hex = safe_from_for_proxy(&self.rpc, self.inbox_addr).await?;
         let res_hex: String = self.rpc.call("eth_call", json!([{
             "to": to_hex,
             "from": from_hex,
             "data": format!("0x{}", hex::encode(data)),
-        }, "latest"])).await?;
+        }, "latest"])).await?
         let res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             anyhow::bail!("short returndata for batchCount")
@@ -85,12 +86,12 @@ impl SequencerInbox for EthSequencerInbox {
         data.extend_from_slice(&Self::encode_selector(SIG_INBOX_ACCS));
         data.extend_from_slice(&Self::encode_u256(U256::from(seq_num)));
         let to_hex = format!("{:#x}", self.inbox_addr);
-        let from_hex = "0x0000000000000000000000000000000000000001";
+        let from_hex = safe_from_for_proxy(&self.rpc, self.inbox_addr).await?;
         let res_hex: String = self.rpc.call("eth_call", json!([{
             "to": to_hex,
             "from": from_hex,
             "data": format!("0x{}", hex::encode(data)),
-        }, "latest"])).await?;
+        }, "latest"])).await?
         let res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             anyhow::bail!("short returndata for inboxAccs")
