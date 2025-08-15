@@ -279,20 +279,30 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             let mut batches_len: u64 = 0;
 
             if missing_delayed || reorging_delayed {
-                let delayed = self
+                match self
                     .delayed_bridge
                     .lookup_messages_in_range(from, to_block, |_b| Ok(Vec::new()))
-                    .await?;
-                if !delayed.is_empty() {
-                    let mut tuples: Vec<(u64, alloy_primitives::B256, Vec<u8>)> = Vec::with_capacity(delayed.len());
-                    for m in &delayed {
-                        let bytes = serialize_incoming_l1_message_legacy(&m.message)?;
-                        tuples.push((m.seq_num, m.before_inbox_acc, bytes));
+                    .await
+                {
+                    Ok(delayed) => {
+                        if !delayed.is_empty() {
+                            let mut tuples: Vec<(u64, alloy_primitives::B256, Vec<u8>)> = Vec::with_capacity(delayed.len());
+                            for m in &delayed {
+                                let bytes = serialize_incoming_l1_message_legacy(&m.message)?;
+                                tuples.push((m.seq_num, m.before_inbox_acc, bytes));
+                            }
+                            if let Err(e) = self.tracker.add_delayed_messages(&tuples, None) {
+                                info!("inbox_reader: add_delayed_messages error: {}", e);
+                            } else {
+                                delayed_len = delayed.len() as u64;
+                                info!("inbox_reader: fetched {} delayed messages", delayed.len());
+                                fetched_any = true;
+                            }
+                        }
                     }
-                    self.tracker.add_delayed_messages(&tuples, None)?;
-                    delayed_len = delayed.len() as u64;
-                    info!("inbox_reader: fetched {} delayed messages", delayed.len());
-                    fetched_any = true;
+                    Err(e) => {
+                        info!("inbox_reader: delayed.lookup_messages_in_range error: {}", e);
+                    }
                 }
             }
 
@@ -305,45 +315,60 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                     .unwrap_or_default();
                 info!("inbox_reader: lookup_batches_in_range returned {} batches", batches.len());
                 if !batches.is_empty() {
-                    for b in batches.iter_mut() {
-                        let (data_bytes, block_hash) = {
-                            let (data, blk_hash, _seen) = self
-                                .sequencer_inbox
-                                .get_sequencer_message_bytes_in_block(
-                                    b.parent_chain_block_number,
-                                    b.sequence_number,
-                                    b.block_hash,
-                                )
-                                .await?;
-                            (data, blk_hash)
-                        };
+                    let mut good_batches = Vec::with_capacity(batches.len());
+                    for mut b in batches.into_iter() {
+                        match self
+                            .sequencer_inbox
+                            .get_sequencer_message_bytes_in_block(
+                                b.parent_chain_block_number,
+                                b.sequence_number,
+                                b.block_hash,
+                            )
+                            .await
+                        {
+                            Ok((data_bytes, block_hash, _)) => {
+                                let mut header = Vec::with_capacity(5 * 8);
+                                let mut buf = [0u8; 8];
+                                buf.copy_from_slice(&b.time_bounds.min_timestamp.to_be_bytes());
+                                header.extend_from_slice(&buf);
+                                buf.copy_from_slice(&b.time_bounds.max_timestamp.to_be_bytes());
+                                header.extend_from_slice(&buf);
+                                buf.copy_from_slice(&b.time_bounds.min_block_number.to_be_bytes());
+                                header.extend_from_slice(&buf);
+                                buf.copy_from_slice(&b.time_bounds.max_block_number.to_be_bytes());
+                                header.extend_from_slice(&buf);
+                                buf.copy_from_slice(&b.after_delayed_count.to_be_bytes());
+                                header.extend_from_slice(&buf);
 
-                        let mut header = Vec::with_capacity(5 * 8);
-                        let mut buf = [0u8; 8];
-                        buf.copy_from_slice(&b.time_bounds.min_timestamp.to_be_bytes());
-                        header.extend_from_slice(&buf);
-                        buf.copy_from_slice(&b.time_bounds.max_timestamp.to_be_bytes());
-                        header.extend_from_slice(&buf);
-                        buf.copy_from_slice(&b.time_bounds.min_block_number.to_be_bytes());
-                        header.extend_from_slice(&buf);
-                        buf.copy_from_slice(&b.time_bounds.max_block_number.to_be_bytes());
-                        header.extend_from_slice(&buf);
-                        buf.copy_from_slice(&b.after_delayed_count.to_be_bytes());
-                        header.extend_from_slice(&buf);
+                                let mut serialized = header;
+                                serialized.extend_from_slice(&data_bytes);
+                                b.serialized = serialized;
 
-                        let mut serialized = header;
-                        serialized.extend_from_slice(&data_bytes);
-                        b.serialized = serialized;
-
-                        if b.block_hash == alloy_primitives::B256::ZERO {
-                            b.block_hash = block_hash;
+                                if b.block_hash == alloy_primitives::B256::ZERO {
+                                    b.block_hash = block_hash;
+                                }
+                                good_batches.push(b);
+                            }
+                            Err(e) => {
+                                info!(
+                                    "inbox_reader: get_sequencer_message_bytes_in_block error for seq {}: {}",
+                                    b.sequence_number, e
+                                );
+                            }
                         }
                     }
-                    self.tracker.add_sequencer_batches_and_stream(&batches)?;
-                    batches_len = batches.len() as u64;
-                    info!("inbox_reader: fetched {} sequencer batches", batches.len());
-                    fetched_any = true;
-                    seen_batch_count = seen_batch_count.max(batches.last().unwrap().sequence_number + 1);
+                    if !good_batches.is_empty() {
+                        if let Err(e) = self.tracker.add_sequencer_batches_and_stream(&good_batches) {
+                            info!("inbox_reader: add_sequencer_batches_and_stream error: {}", e);
+                        } else {
+                            batches_len = good_batches.len() as u64;
+                            info!("inbox_reader: fetched {} sequencer batches", batches_len);
+                            fetched_any = true;
+                            if let Some(last) = good_batches.last() {
+                                seen_batch_count = seen_batch_count.max(last.sequence_number + 1);
+                            }
+                        }
+                    }
                 }
             }
 
