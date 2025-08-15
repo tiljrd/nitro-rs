@@ -36,6 +36,14 @@ struct RpcReceipt {
     logs: Vec<RpcLog>,
 }
 
+#[derive(Deserialize)]
+struct RpcTx {
+    #[serde(default)]
+    input: String,
+    #[serde(default)]
+    blobVersionedHashes: Option<Vec<String>>,
+}
+
 pub struct EthSequencerInbox {
     rpc: Arc<RpcClient>,
     inbox_addr: Address,
@@ -293,5 +301,20 @@ impl SequencerInbox for EthSequencerInbox {
             .and_then(|h| B256::from_str(h).ok())
             .unwrap_or_default();
         Ok((batch_bytes, block_hash, Vec::new()))
+    async fn get_tx_input_and_blobs(&self, tx_hash: B256) -> anyhow::Result<(Vec<u8>, Vec<B256>)> {
+        let tx_hex = format!("{:#x}", tx_hash);
+        let tx: RpcTx = self.rpc.call("eth_getTransactionByHash", json!([tx_hex])).await?;
+        let input = hex::decode(tx.input.trim_start_matches("0x"))?;
+        let mut blobs: Vec<B256> = Vec::new();
+        if let Some(hashes) = tx.blobVersionedHashes {
+            for h in hashes {
+                if let Ok(b) = B256::from_str(&h) {
+                    blobs.push(b);
+                }
+            }
+        }
+        Ok((input, blobs))
+    }
+
     }
 }

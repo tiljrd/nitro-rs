@@ -297,6 +297,66 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                                 delayed_len = delayed.len() as u64;
                                 info!("inbox_reader: fetched {} delayed messages", delayed.len());
                                 fetched_any = true;
+        for b in batches.iter_mut() {
+            let mut header = Vec::with_capacity(5 * 8);
+            for v in [
+                b.time_bounds.min_timestamp,
+                b.time_bounds.max_timestamp,
+                b.time_bounds.min_block_number,
+                b.time_bounds.max_block_number,
+                b.after_delayed_count,
+            ] {
+                header.extend_from_slice(&v.to_be_bytes());
+            }
+            let data_bytes = match b.data_location {
+                0 => {
+                    let (tx_input, _blobs) = self.sequencer_inbox.get_tx_input_and_blobs(b.tx_hash).await?;
+                    if tx_input.len() < 4 + 32 {
+                        anyhow::bail!("tx input too short for batch data");
+                    }
+                    let params = &tx_input[4..];
+                    let mut found: Option<Vec<u8>> = None;
+                    let words = params.len() / 32;
+                    for i in 0..words {
+                        let off_be = &params[i * 32..(i + 1) * 32];
+                        let off = U256::from_be_bytes(<[u8; 32]>::try_from(off_be).unwrap()).to::<usize>();
+                        if off + 32 <= params.len() {
+                            let mut len_bytes = [0u8; 32];
+                            len_bytes.copy_from_slice(&params[off..off + 32]);
+                            let len = U256::from_be_bytes(len_bytes).to::<usize>();
+                            if off + 32 + len <= params.len() {
+                                let bytes = params[off + 32..off + 32 + len].to_vec();
+                                found = Some(bytes);
+                                break;
+                            }
+                        }
+                    }
+                    found.ok_or_else(|| anyhow::anyhow!("could not locate dynamic bytes in tx input"))?
+                }
+                1 => {
+                    let (bytes, bh, _seen) = self.sequencer
+                        .get_sequencer_message_bytes_in_block(
+                            b.parent_chain_block_number,
+                            b.sequence_number,
+                            b.tx_hash,
+                            b.block_hash,
+                        )
+                        .await?;
+                    if b.block_hash == B256::ZERO {
+                        b.block_hash = bh;
+                    }
+                    bytes
+                }
+                2 => {
+                    Vec::new()
+                }
+                3 => {
+                    anyhow::bail!("BatchDataBlobHashes not yet supported")
+                }
+                _ => anyhow::bail!("invalid data_location {}", b.data_location),
+            };
+            b.serialized = [header, data_bytes].concat();
+        }
                             }
                         }
                     }
