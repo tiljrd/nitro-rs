@@ -139,30 +139,26 @@ impl Decodable for L1IncomingMessage {
 }
 use alloy_primitives::keccak256;
 
-fn u64_min_be_bytes(n: u64) -> Vec<u8> {
-    if n == 0 {
-        return Vec::new();
-    }
-    let be = n.to_be_bytes();
-    let mut i = 0usize;
-    while i < be.len() && be[i] == 0 {
-        i += 1;
-    }
-    be[i..].to_vec()
+fn u64_be_8(n: u64) -> [u8; 8] {
+    n.to_be_bytes()
 }
 
 pub fn delayed_message_body_hash(msg: &L1IncomingMessage) -> B256 {
     let mut buf: Vec<u8> = Vec::new();
     buf.push(msg.header.kind);
     buf.extend_from_slice(msg.header.poster.as_slice());
-    buf.extend_from_slice(&u64_min_be_bytes(msg.header.block_number));
-    buf.extend_from_slice(&u64_min_be_bytes(msg.header.timestamp));
+    buf.extend_from_slice(&u64_be_8(msg.header.block_number));
+    buf.extend_from_slice(&u64_be_8(msg.header.timestamp));
     if let Some(req) = msg.header.request_id {
         buf.extend_from_slice(req.as_slice());
     }
     let mut base_fee_be = msg.header.l1_base_fee.to_be_bytes_vec();
-    while !base_fee_be.is_empty() && base_fee_be[0] == 0 {
-        base_fee_be.remove(0);
+    if base_fee_be.len() < 32 {
+        let mut padded = vec![0u8; 32 - base_fee_be.len()];
+        padded.extend_from_slice(&base_fee_be);
+        base_fee_be = padded;
+    } else if base_fee_be.len() > 32 {
+        base_fee_be = base_fee_be[base_fee_be.len() - 32..].to_vec();
     }
     buf.extend_from_slice(&base_fee_be);
     let l2_hash = keccak256(&msg.l2msg);
