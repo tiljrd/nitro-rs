@@ -127,6 +127,7 @@ impl SequencerInbox for EthSequencerInbox {
         });
         info!("eth_sequencer: lookup_batches_in_range from={} to={}", from_block, to_block);
         let logs: Vec<RpcLog> = self.rpc.call("eth_getLogs", json!([filter])).await?;
+        info!("eth_sequencer: raw SequencerBatchDelivered logs fetched: {}", logs.len());
         
         let mut out = Vec::with_capacity(logs.len());
         
