@@ -389,10 +389,11 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                                     good_batches.push(b);
                                 }
                                 Err(e) => {
-                                info!(
-                                    "inbox_reader: get_sequencer_message_bytes_in_block error for seq {}: {}",
-                                    b.sequence_number, e
-                                );
+                                    info!(
+                                        "inbox_reader: get_sequencer_message_bytes_in_block error for seq {}: {}",
+                                        b.sequence_number, e
+                                    );
+                                }
                             }
                         }
                     }
