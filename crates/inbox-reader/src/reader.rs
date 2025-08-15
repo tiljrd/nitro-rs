@@ -439,11 +439,31 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                     }
 
                     if !good_batches.is_empty() {
-                        let our_latest_batch = self.tracker.get_batch_count().unwrap_or(0);
+                        let mut our_latest_batch = self.tracker.get_batch_count().unwrap_or(0);
+                        if our_latest_batch > 0 {
+                            let mut probe = our_latest_batch - 1;
+                            while probe > 0 {
+                                if self.tracker.get_batch_metadata(probe).is_ok() {
+                                    break;
+                                }
+                                probe = probe.saturating_sub(1);
+                            }
+                            if our_latest_batch > 0 {
+                                if probe + 1 != our_latest_batch {
+                                    info!(
+                                        "inbox_reader: adjusting expected start from {} to {} due to missing prev metadata",
+                                        our_latest_batch, probe + 1
+                                    );
+                                    our_latest_batch = probe + 1;
+                                }
+                            }
+                        }
+
                         let mut sorted = good_batches;
                         sorted.sort_by_key(|b| b.sequence_number);
                         let mut filtered: Vec<inbox_bridge::types::SequencerInboxBatch> = Vec::new();
                         let mut expected = our_latest_batch;
+
                         for b in sorted.into_iter() {
                             if b.sequence_number == expected {
                                 filtered.push(b);
@@ -452,11 +472,16 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                                 break;
                             }
                         }
+
                         if filtered.is_empty() && our_latest_batch > 0 {
-                            info!("inbox_reader: no contiguous batches starting at our_latest={}, skipping window", our_latest_batch);
+                            info!(
+                                "inbox_reader: no contiguous batches starting at expected={}, skipping window",
+                                our_latest_batch
+                            );
                         } else if filtered.is_empty() && our_latest_batch == 0 {
                             info!("inbox_reader: no batches starting at 0 found in this window; will continue scanning");
                         }
+
                         if !filtered.is_empty() {
                             if let Err(e) = self.tracker.add_sequencer_batches_and_stream(&filtered) {
                                 info!("inbox_reader: add_sequencer_batches_and_stream error: {}", e);
