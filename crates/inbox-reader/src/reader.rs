@@ -283,12 +283,14 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                 }
             }
 
+                info!("inbox_reader: invoking sequencer.lookup_batches_in_range from={} to={}", from, to_block);
             if missing_sequencer || reorging_sequencer {
                 let mut batches = self
                     .sequencer_inbox
                     .lookup_batches_in_range(from, to_block)
                     .await
                     .unwrap_or_default();
+                info!("inbox_reader: lookup_batches_in_range returned {} batches", batches.len());
                 if !batches.is_empty() {
                     for b in batches.iter_mut() {
                         let (bytes, block_hash) = {
