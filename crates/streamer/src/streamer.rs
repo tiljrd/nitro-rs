@@ -232,6 +232,14 @@ impl<D: Database> TransactionStreamer<D> {
         mut messages: Vec<MessageWithMetadataAndBlockInfo>,
         track_block_metadata_from: Option<u64>,
     ) -> Result<()> {
+        let db_count_now = self.get_message_count().unwrap_or(0);
+        if db_count_now != first_msg_idx {
+            return Err(anyhow::anyhow!(format!(
+                "non-contiguous append: db_count={} first_msg_idx={}",
+                db_count_now, first_msg_idx
+            )));
+        }
+
         let mut confirmed_reorg = false;
         let mut old_msg: Option<MessageWithMetadata> = None;
         let mut last_delayed_read: u64 = 0;

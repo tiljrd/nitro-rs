@@ -334,13 +334,13 @@ impl<D: Database> InboxTracker<D> {
 
     pub fn add_sequencer_batches_and_stream(&self, batches: &[SequencerInboxBatch]) -> anyhow::Result<()> {
         if batches.is_empty() { return Ok(()); }
-        self.add_sequencer_batches(batches)?;
         let first_seq = batches[0].sequence_number;
         let prev_meta = if first_seq > 0 {
             self.get_batch_metadata(first_seq - 1)?
         } else {
             BatchMetadata { accumulator: B256::ZERO, message_count: 0, delayed_message_count: 0, parent_chain_block: 0 }
         };
+
         let mut backend = self.build_backend(batches);
         let mut mux = InboxMultiplexer::new(backend, prev_meta.delayed_message_count);
         let mut out: Vec<MessageWithMetadataAndBlockInfo> = Vec::new();
@@ -350,8 +350,23 @@ impl<D: Database> InboxTracker<D> {
                 None => break,
             }
         }
+
         if !out.is_empty() {
+            let db_count = {
+                let data = self.db.get(MESSAGE_COUNT_KEY)?;
+                let mut bytes = data.as_slice();
+                <u64 as alloy_rlp::Decodable>::decode(&mut bytes)?
+            };
+            if db_count != prev_meta.message_count {
+                tracing::warn!(
+                    "inbox_tracker: message_count mismatch; db_count={} prev_meta.message_count={} first_seq={}",
+                    db_count, prev_meta.message_count, first_seq
+                );
+                return Ok(());
+            }
+
             self.tx_streamer.add_confirmed_messages_and_end_batch(prev_meta.message_count, &out, None)?;
+            self.add_sequencer_batches(batches)?;
         }
         Ok(())
     }
