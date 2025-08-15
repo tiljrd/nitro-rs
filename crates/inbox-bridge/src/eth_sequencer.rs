@@ -13,7 +13,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tracing::info;
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct RpcLog {
     address: String,
     data: String,
@@ -24,6 +24,16 @@ struct RpcLog {
     blockHash: Option<String>,
     #[serde(default)]
     transactionHash: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct RpcReceipt {
+    #[serde(default)]
+    blockNumber: Option<String>,
+    #[serde(default)]
+    blockHash: Option<String>,
+    #[serde(default)]
+    logs: Vec<RpcLog>,
 }
 
 pub struct EthSequencerInbox {
@@ -230,25 +240,40 @@ impl SequencerInbox for EthSequencerInbox {
         };
         info!("eth_sequencer: get_sequencer_message_bytes_in_block block={} hash={} addr={} topic0={} topic1={}", block_number, format!("{:#x}", block_hash), format!("{:#x}", self.inbox_addr), format!("{:#x}", topic0), format!("{:#x}", topic1));
         let logs: Vec<RpcLog> = self.rpc.call("eth_getLogs", json!([filter])).await?;
-        let lg = if logs.len() == 1 {
-            &logs[0]
-        } else if logs.len() > 1 {
-            if tx_hash == B256::ZERO {
-                anyhow::bail!("multiple SequencerBatchData logs for seq {} at block {}, missing tx_hash to disambiguate", seq_num, block_number);
-            }
+        let mut chosen: Option<RpcLog> = None;
+        if logs.len() == 1 {
+            chosen = Some(logs[0].clone());
+        } else if logs.len() > 1 && tx_hash != B256::ZERO {
             let wanted = format!("{:#x}", tx_hash);
-            let mut sel: Option<&RpcLog> = None;
-            for l in &logs {
+            for l in logs {
                 if let Some(th) = &l.transactionHash {
                     if th.eq_ignore_ascii_case(&wanted) {
-                        sel = Some(l);
+                        chosen = Some(l);
                         break;
                     }
                 }
             }
-            sel.ok_or_else(|| anyhow::anyhow!("no SequencerBatchData with matching tx_hash for seq {} at block {}", seq_num, block_number))?
+        }
+        let lg = if chosen.is_none() {
+            if tx_hash == B256::ZERO {
+                anyhow::bail!("no unambiguous SequencerBatchData log for seq {} at block {} and no tx_hash provided", seq_num, block_number);
+            }
+            let tx_hex = format!("{:#x}", tx_hash);
+            let receipt: RpcReceipt = self.rpc.call("eth_getTransactionReceipt", json!([tx_hex])).await?;
+            let t0_hex = format!("{:#x}", topic0);
+            let t1_hex = format!("{:#x}", topic1);
+            let mut found: Option<RpcLog> = None;
+            for l in receipt.logs {
+                let ok_addr = l.address.eq_ignore_ascii_case(&format!("{:#x}", self.inbox_addr));
+                let ok_topics = l.topics.len() >= 2 && l.topics[0].eq_ignore_ascii_case(&t0_hex) && l.topics[1].eq_ignore_ascii_case(&t1_hex);
+                if ok_addr && ok_topics {
+                    found = Some(l);
+                    break;
+                }
+            }
+            found.ok_or_else(|| anyhow::anyhow!("no SequencerBatchData in receipt for seq {} (tx {})", seq_num, tx_hex))?
         } else {
-            anyhow::bail!("no SequencerBatchData log for seq {} at block {}", seq_num, block_number);
+            chosen.unwrap()
         };
         let data_hex = &lg.data;
         let data = hex::decode(data_hex.trim_start_matches("0x"))?;
