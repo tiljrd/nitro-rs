@@ -89,6 +89,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
         };
         info!("inbox_reader: starting loop with read_mode={}", read_mode);
         let mut seen_batch_count: u64 = 0;
+            info!("inbox_reader: loop begin; current from={} read_mode={}", from, (self.config)().read_mode);
         loop {
             let cfg = (self.config)();
             let mut current_height: u64 = 0;
@@ -335,6 +336,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             } else if have_messages > 0 {
                 from = to_block.saturating_add(1);
             }
+            info!("inbox_reader: loop end; next from={} blocks_to_fetch={}", from, blocks_to_fetch);
         }
         #[allow(unreachable_code)]
         {
