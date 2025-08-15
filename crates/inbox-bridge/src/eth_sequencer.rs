@@ -123,13 +123,15 @@ impl SequencerInbox for EthSequencerInbox {
 
     async fn lookup_batches_in_range(&self, from_block: u64, to_block: u64) -> anyhow::Result<Vec<SequencerInboxBatch>> {
         let topic0: B256 = keccak256(EVT_SEQUENCER_BATCH_DELIVERED.as_bytes());
+        let addr_hex = format!("{:#x}", self.inbox_addr);
+        let topic_hex = format!("{:#x}", topic0);
         let filter = json!({
             "fromBlock": format!("0x{:x}", from_block),
             "toBlock": format!("0x{:x}", to_block),
-            "address": format!("{:#x}", self.inbox_addr),
-            "topics": [[format!("{:#x}", topic0)]],
+            "address": addr_hex,
+            "topics": [[topic_hex]],
         });
-        info!("eth_sequencer: lookup_batches_in_range from={} to={}", from_block, to_block);
+        info!("eth_sequencer: lookup_batches_in_range from={} to={} addr={} topic0={}", from_block, to_block, format!("{:#x}", self.inbox_addr), format!("{:#x}", topic0));
         let logs: Vec<RpcLog> = self.rpc.call("eth_getLogs", json!([filter])).await?;
         info!("eth_sequencer: raw SequencerBatchDelivered logs fetched: {}", logs.len());
         
@@ -192,20 +194,24 @@ impl SequencerInbox for EthSequencerInbox {
         let mut topic1_bytes = [0u8; 32];
         topic1_bytes[24..32].copy_from_slice(&seq_num.to_be_bytes());
         let topic1 = B256::from_slice(&topic1_bytes);
+        let addr_hex = format!("{:#x}", self.inbox_addr);
+        let t0_hex = format!("{:#x}", topic0);
+        let t1_hex = format!("{:#x}", topic1);
         let filter = if block_hash != B256::ZERO {
             json!({
                 "blockHash": format!("{:#x}", block_hash),
-                "address": format!("{:#x}", self.inbox_addr),
-                "topics": [[format!("{:#x}", topic0)], [format!("{:#x}", topic1)]],
+                "address": addr_hex,
+                "topics": [[t0_hex], [t1_hex]],
             })
         } else {
             json!({
                 "fromBlock": format!("0x{:x}", block_number),
                 "toBlock": format!("0x{:x}", block_number),
-                "address": format!("{:#x}", self.inbox_addr),
-                "topics": [[format!("{:#x}", topic0)], [format!("{:#x}", topic1)]],
+                "address": addr_hex,
+                "topics": [[t0_hex], [t1_hex]],
             })
         };
+        info!("eth_sequencer: get_sequencer_message_bytes_in_block block={} hash={} addr={} topic0={} topic1={}", block_number, format!("{:#x}", block_hash), format!("{:#x}", self.inbox_addr), format!("{:#x}", topic0), format!("{:#x}", topic1));
         let logs: Vec<RpcLog> = self.rpc.call("eth_getLogs", json!([filter])).await?;
         if logs.len() != 1 {
             anyhow::bail!("expected exactly 1 SequencerBatchData log for seq {} at block {}", seq_num, block_number);
