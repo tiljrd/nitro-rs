@@ -316,6 +316,4 @@ impl SequencerInbox for EthSequencerInbox {
         }
         Ok((input, blobs))
     }
-
-    }
 }
