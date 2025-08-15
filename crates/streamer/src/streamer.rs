@@ -409,7 +409,7 @@ impl<D: Database> TransactionStreamer<D> {
     pub fn get_head_message_index(&self) -> Result<u64> {
         let count = self.message_count()?;
         if count == 0 {
-            Ok(0)
+            Ok(u64::MAX)
         } else {
             Ok(count - 1)
         }
