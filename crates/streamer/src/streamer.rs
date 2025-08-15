@@ -264,6 +264,20 @@ impl<D: Database> TransactionStreamer<D> {
             last_delayed_read = self.get_prev_prev_delayed_read(first_msg_idx)?;
         }
 
+        if !messages.is_empty() {
+            let db_count = self.get_message_count().unwrap_or(0);
+            if db_count < first_msg_idx && last_delayed_read == 0 {
+                let first_dm = messages[0].message_with_meta.delayed_messages_read;
+                tracing::info!(
+                    "streamer: seeding last_delayed_read due to gap: db_count={} first_msg_idx={} seed_dm_read={}",
+                    db_count,
+                    first_msg_idx,
+                    first_dm
+                );
+                last_delayed_read = first_dm;
+            }
+        }
+
         for (i, msg) in messages.iter().enumerate() {
             let msg_idx = first_msg_idx + i as u64;
             let dm_read = msg.message_with_meta.delayed_messages_read;
