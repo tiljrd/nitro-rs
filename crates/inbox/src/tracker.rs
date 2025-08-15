@@ -130,7 +130,27 @@ impl<D: Database> InboxTracker<D> {
     pub fn get_batch_count(&self) -> anyhow::Result<u64> {
         let data = self.db.get(SEQUENCER_BATCH_COUNT_KEY)?;
         let mut bytes = &data[..];
-        Ok(u64::decode(&mut bytes)?)
+        let mut count: u64 = u64::decode(&mut bytes)?;
+        if count == 0 {
+            return Ok(0);
+        }
+        let mut repaired = false;
+        while count > 0 {
+            let key_prev = db_key(SEQUENCER_BATCH_META_PREFIX, count - 1);
+            if self.db.has(&key_prev)? {
+                break;
+            }
+            count -= 1;
+            repaired = true;
+        }
+        if repaired {
+            let mut batch = self.db.new_batch();
+            let enc = alloy_rlp::encode(&count);
+            batch.put(SEQUENCER_BATCH_COUNT_KEY, &enc)?;
+            batch.write()?;
+            tracing::info!("inbox_tracker: repaired batch_count to {}", count);
+        }
+        Ok(count)
     }
     pub fn reorg_delayed_to(&self, new_delayed_count: u64) -> anyhow::Result<()> {
         let mut batch = self.db.new_batch();
