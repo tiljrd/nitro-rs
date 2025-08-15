@@ -40,5 +40,6 @@ pub struct SequencerInboxBatch {
     pub bridge_address: Address,
     pub parent_chain_block_number: u64,
     pub block_hash: B256,
+    pub tx_hash: B256,
     pub serialized: Vec<u8>,
 }
