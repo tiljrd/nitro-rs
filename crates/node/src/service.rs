@@ -1,3 +1,4 @@
+use reth_arbitrum_chainspec::arbitrum_sepolia_spec;
 use anyhow::Result;
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 use std::str::FromStr;
@@ -187,8 +188,23 @@ impl NitroNode {
         let json_seq_inbox_addr = Address::from_str(&rollup.sequencer_inbox)?;
         let json_deployed_at = rollup.deployed_at.unwrap_or(0);
 
-        let mut spec = reth_chainspec::ChainSpec::default();
-        spec.chain = Chain::from(chain_id);
+        let delayed_bridge_addr = if let Some(a) = delayed_bridge_addr_opt { a } else { json_bridge_addr };
+        let sequencer_inbox_addr = if let Some(a) = sequencer_inbox_addr_opt { a } else { json_seq_inbox_addr };
+
+        let header_reader = Arc::new(inbox_bridge::header_reader::HttpHeaderReader::new_http(&l1_rpc, 1000).await?);
+        let delayed_bridge = Arc::new(inbox_bridge::eth_delayed::EthDelayedBridge::new_http(&l1_rpc, delayed_bridge_addr).await?);
+        let sequencer_inbox = Arc::new(inbox_bridge::eth_sequencer::EthSequencerInbox::new_http(&l1_rpc, sequencer_inbox_addr).await?);
+
+        let spec = if let Some(spec) = crate::genesis::GenesisBootstrap::build_spec_from_init_message(
+            &chain_entry,
+            delayed_bridge.as_ref(),
+            header_reader.as_ref(),
+            json_deployed_at,
+        ).await? {
+            spec
+        } else {
+            arbitrum_sepolia_spec()
+        };
         let net = NetworkArgs::default().with_unused_ports();
         let arb_cfg = NodeConfig::new(Arc::new(spec))
             .with_network(net)
@@ -209,29 +225,6 @@ impl NitroNode {
         let streamer_impl = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone(), exec));
         let streamer_trait = streamer_impl.clone() as Arc<dyn nitro_inbox::streamer::Streamer>;
 
-        let header_reader = Arc::new(inbox_bridge::header_reader::HttpHeaderReader::new_http(&l1_rpc, 1000).await?);
-
-        let delayed_bridge_addr = if let Some(a) = delayed_bridge_addr_opt {
-            a
-        } else {
-            json_bridge_addr
-        };
-        let sequencer_inbox_addr = if let Some(a) = sequencer_inbox_addr_opt {
-            a
-        } else {
-            json_seq_inbox_addr
-        };
-
-        let delayed_bridge = Arc::new(inbox_bridge::eth_delayed::EthDelayedBridge::new_http(
-            &l1_rpc,
-            delayed_bridge_addr,
-        ).await?);
-
-        let sequencer_inbox = Arc::new(inbox_bridge::eth_sequencer::EthSequencerInbox::new_http(
-            &l1_rpc,
-            sequencer_inbox_addr,
-        ).await?);
-
         let reader_config: nitro_inbox_reader::reader::InboxReaderConfigFetcher = Arc::new(|| {
             let mut cfg = nitro_inbox_reader::reader::InboxReaderConfig::default();
             cfg.check_delay_ms = 5_000;
@@ -242,6 +235,14 @@ impl NitroNode {
 
         let tracker = Arc::new(nitro_inbox::tracker::InboxTracker::new(db.clone(), streamer_trait.clone()));
         tracker.initialize()?;
+        let _ = crate::genesis::GenesisBootstrap::seed_from_init_message(
+            db.as_ref(),
+            &chain_entry,
+            delayed_bridge.as_ref(),
+            sequencer_inbox.as_ref(),
+            header_reader.as_ref(),
+            json_deployed_at,
+        ).await?;
 
         let first_msg_block: u64 = if let Some(v) = self.args.first_message_block {
             v
