@@ -216,6 +216,8 @@ impl NitroNode {
         }
         let net = NetworkArgs::default().with_unused_ports();
         let genesis_hash = spec.genesis_hash();
+        let genesis_header = spec.genesis_header().clone();
+        let genesis_timestamp = genesis_header.timestamp;
         let arb_cfg = NodeConfig::new(Arc::new(spec))
             .with_network(net)
             .with_rpc(rpc);
@@ -231,7 +233,7 @@ impl NitroNode {
         let beacon_handle = arb_handle.node.add_ons_handle.beacon_engine_handle.clone();
         let payload_handle = arb_handle.node.payload_builder_handle.clone();
 
-        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(db.clone(), beacon_handle, payload_handle, genesis_hash);
+        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(db.clone(), beacon_handle, payload_handle, genesis_hash, genesis_timestamp);
         let streamer_impl = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone(), exec));
         let streamer_trait = streamer_impl.clone() as Arc<dyn nitro_inbox::streamer::Streamer>;
 

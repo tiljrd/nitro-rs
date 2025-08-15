@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use nitro_streamer::engine::ExecEngine;
@@ -28,15 +29,17 @@ pub struct RethExecEngine {
     payload_builder_handle: Option<PayloadBuilderHandle<PayloadTy>>,
     db: Arc<dyn Database>,
     genesis_hash: B256,
+    last_timestamp: AtomicU64,
 }
 
 impl RethExecEngine {
-    pub fn new(db: Arc<dyn Database>, genesis_hash: B256) -> Arc<Self> {
+    pub fn new(db: Arc<dyn Database>, genesis_hash: B256, genesis_timestamp: u64) -> Arc<Self> {
         Arc::new(Self {
             beacon_engine_handle: None,
             payload_builder_handle: None,
             db,
             genesis_hash,
+            last_timestamp: AtomicU64::new(genesis_timestamp),
         })
     }
 
@@ -45,12 +48,14 @@ impl RethExecEngine {
         beacon_engine_handle: BeaconConsensusEngineHandle<PayloadTy>,
         payload_builder_handle: PayloadBuilderHandle<PayloadTy>,
         genesis_hash: B256,
+        genesis_timestamp: u64,
     ) -> Arc<Self> {
         Arc::new(Self {
             beacon_engine_handle: Some(beacon_engine_handle),
             payload_builder_handle: Some(payload_builder_handle),
             db,
             genesis_hash,
+            last_timestamp: AtomicU64::new(genesis_timestamp),
         })
     }
 }
@@ -112,8 +117,14 @@ impl ExecEngine for RethExecEngine {
         };
 
         tracing::info!("engine_adapter: digest_message idx={} using parent_hash={:?}", msg_idx, parent_hash);
+        let mut ts = msg.message.header.timestamp;
+        let prev = self.last_timestamp.load(Ordering::Relaxed);
+        if ts <= prev {
+            ts = prev.saturating_add(1);
+        }
+        self.last_timestamp.store(ts, Ordering::Relaxed);
         let rpc_attrs = EthPayloadAttributes {
-            timestamp: msg.message.header.timestamp,
+            timestamp: ts,
             prev_randao: B256::ZERO,
             suggested_fee_recipient: Address::ZERO,
             withdrawals: None,
@@ -218,9 +229,10 @@ impl ExecEngine for RethExecEngine {
             .await
             .map_err(|e| anyhow!("engine fork_choice_updated error: {e}"))?;
         tracing::info!("engine_adapter: forkchoiceUpdated payload_status={:?}", fcu_resp.payload_status);
-        if !matches!(fcu_resp.payload_status.status, PayloadStatusEnum::Valid) {
-            return Err(anyhow!("engine fork_choice_updated not valid: {:?}", fcu_resp.payload_status));
+        if !matches!(fcu_resp.payload_status.status, PayloadStatusEnum::Valid | PayloadStatusEnum::Syncing) {
+            return Err(anyhow!("engine fork_choice_updated not valid/syncing: {:?}", fcu_resp.payload_status));
         }
+        let _ = self.last_timestamp.fetch_max(header.timestamp, Ordering::Relaxed);
         Ok(MessageResult { block_hash, send_root })
     }
     async fn result_at_message_index(&self, msg_idx: u64) -> Result<MessageResult> {
