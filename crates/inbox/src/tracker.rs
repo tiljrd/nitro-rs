@@ -372,16 +372,30 @@ impl<D: Database> InboxTracker<D> {
             if *seqnum != pos {
                 anyhow::bail!("unexpected delayed sequence number {}, expected {}", seqnum, pos);
             }
+            let msg = parse_incoming_l1_message_legacy(msg_bytes)?;
+            let body_hash = delayed_message_body_hash(&msg);
+            let computed_after = hash_after(next_acc, body_hash.as_slice());
             if next_acc != *before_acc {
+                tracing::error!(
+                    seqnum = *seqnum,
+                    expected_before = ?before_acc,
+                    have_before = ?next_acc,
+                    kind = msg.header.kind,
+                    poster = %msg.header.poster,
+                    block_number = msg.header.block_number,
+                    timestamp = msg.header.timestamp,
+                    request_id = ?msg.header.request_id,
+                    l1_base_fee = %msg.header.l1_base_fee,
+                    l2_keccak = %alloy_primitives::keccak256(&msg.l2msg),
+                    "previous delayed accumulator mismatch"
+                );
                 anyhow::bail!("previous delayed accumulator mismatch for message {}", seqnum);
             }
             let mut data = next_acc.0.to_vec();
             data.extend_from_slice(msg_bytes);
             let key = db_key(RLP_DELAYED_MESSAGE_PREFIX, *seqnum);
             batch.put(&key, &data)?;
-            let msg = parse_incoming_l1_message_legacy(msg_bytes)?;
-            let body_hash = delayed_message_body_hash(&msg);
-            next_acc = hash_after(next_acc, body_hash.as_slice());
+            next_acc = computed_after;
             pos += 1;
         }
         self.set_delayed_count_reorg_and_write_batch(batch.as_mut(), first_pos, pos, true)?;
