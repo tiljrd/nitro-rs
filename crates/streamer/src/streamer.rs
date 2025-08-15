@@ -160,8 +160,11 @@ impl<D: Database> TransactionStreamer<D> {
         if msg_idx == 0 {
             return Ok(0);
         }
-        let prev = self.get_message(msg_idx - 1)?;
-        Ok(prev.delayed_messages_read)
+        match self.get_message(msg_idx - 1) {
+            Ok(prev) => Ok(prev.delayed_messages_read),
+            Err(e) if e.to_string().contains("not found") => Ok(0),
+            Err(e) => Err(e),
+        }
     }
 
     fn count_duplicate_messages(
