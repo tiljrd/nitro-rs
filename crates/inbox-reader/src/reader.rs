@@ -329,6 +329,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             if reorging_delayed || reorging_sequencer {
                 let prev = self.get_prev_block_for_reorg(from, blocks_to_fetch)?;
                 from = prev;
+                blocks_to_fetch = cfg.min_blocks_to_read;
             } else {
                 from = to_block.saturating_add(1);
             }

@@ -254,7 +254,7 @@ impl DelayedBridge for EthDelayedBridge {
             out.push(dim);
         }
 
-        out.sort_by_key(|m| U256::from_be_bytes(m.message.header.request_id.unwrap().0));
+        out.sort_by_key(|m| m.seq_num);
         Ok(out)
     }
 }
