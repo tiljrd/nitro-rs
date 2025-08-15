@@ -262,6 +262,9 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             info!("inbox_reader: to_block computed {}", to_block);
             let mut fetched_any = false;
 
+            let mut delayed_len: u64 = 0;
+            let mut batches_len: u64 = 0;
+
             if missing_delayed || reorging_delayed {
                 let delayed = self
                     .delayed_bridge
@@ -274,6 +277,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                         tuples.push((m.seq_num, m.before_inbox_acc, bytes));
                     }
                     self.tracker.add_delayed_messages(&tuples, None)?;
+                    delayed_len = delayed.len() as u64;
                     info!("inbox_reader: fetched {} delayed messages", delayed.len());
                     fetched_any = true;
                 }
@@ -300,6 +304,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                         }
                     }
                     self.tracker.add_sequencer_batches_and_stream(&batches)?;
+                    batches_len = batches.len() as u64;
                     info!("inbox_reader: fetched {} sequencer batches", batches.len());
                     fetched_any = true;
                     seen_batch_count = seen_batch_count.max(batches.last().unwrap().sequence_number + 1);
@@ -309,7 +314,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             self.last_read_batch_count.store(checking_batch_count, Ordering::Relaxed);
             self.last_seen_batch_count.store(seen_batch_count, Ordering::Relaxed);
 
-            let have_messages: u64 = (delayed.len() as u64) + (batches.len() as u64);
+            let have_messages: u64 = delayed_len + batches_len;
             if have_messages <= (cfg.target_messages_read / 2) {
                 blocks_to_fetch = blocks_to_fetch.saturating_add((blocks_to_fetch + 4) / 5);
             } else if have_messages >= (cfg.target_messages_read.saturating_mul(3) / 2) {
