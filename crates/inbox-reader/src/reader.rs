@@ -294,14 +294,35 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                 info!("inbox_reader: lookup_batches_in_range returned {} batches", batches.len());
                 if !batches.is_empty() {
                     for b in batches.iter_mut() {
-                        let (bytes, block_hash) = {
+                        let (data_bytes, block_hash) = {
                             let (data, blk_hash, _seen) = self
                                 .sequencer_inbox
-                                .get_sequencer_message_bytes_in_block(b.parent_chain_block_number, b.sequence_number, b.block_hash)
+                                .get_sequencer_message_bytes_in_block(
+                                    b.parent_chain_block_number,
+                                    b.sequence_number,
+                                    b.block_hash,
+                                )
                                 .await?;
                             (data, blk_hash)
                         };
-                        b.serialized = bytes;
+
+                        let mut header = Vec::with_capacity(5 * 8);
+                        let mut buf = [0u8; 8];
+                        buf.copy_from_slice(&b.time_bounds.min_timestamp.to_be_bytes());
+                        header.extend_from_slice(&buf);
+                        buf.copy_from_slice(&b.time_bounds.max_timestamp.to_be_bytes());
+                        header.extend_from_slice(&buf);
+                        buf.copy_from_slice(&b.time_bounds.min_block_number.to_be_bytes());
+                        header.extend_from_slice(&buf);
+                        buf.copy_from_slice(&b.time_bounds.max_block_number.to_be_bytes());
+                        header.extend_from_slice(&buf);
+                        buf.copy_from_slice(&b.after_delayed_count.to_be_bytes());
+                        header.extend_from_slice(&buf);
+
+                        let mut serialized = header;
+                        serialized.extend_from_slice(&data_bytes);
+                        b.serialized = serialized;
+
                         if b.block_hash == alloy_primitives::B256::ZERO {
                             b.block_hash = block_hash;
                         }
