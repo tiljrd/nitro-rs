@@ -1,5 +1,5 @@
 use crate::db::Database;
-use crate::multiplexer::{InboxMultiplexer, InboxBackend};
+use crate::multiplexer::{InboxMultiplexer, InboxBackend, parse_sequencer_message};
 use crate::streamer::Streamer;
 use alloy_primitives::B256;
 use alloy_rlp::Decodable;
@@ -186,7 +186,15 @@ impl<D: Database> InboxTracker<D> {
         let mut last_meta = prev_meta.clone();
         let mut to_cache: Vec<(u64, BatchMetadata)> = Vec::with_capacity(batches.len());
         for b in batches {
-            let msg_count_for_batch = last_meta.message_count + 1;
+            let seq_msg = parse_sequencer_message(b.sequence_number, Some(b.block_hash), &b.serialized)?;
+            let l2_count: u64 = seq_msg
+                .segments
+                .iter()
+                .filter(|seg| !seg.is_empty() && (seg[0] == 0 || seg[0] == 1))
+                .count() as u64;
+            let delayed_inc = b.after_delayed_count.saturating_sub(last_meta.delayed_message_count);
+            let msg_count_for_batch = last_meta.message_count + l2_count + delayed_inc;
+
             let meta = BatchMetadata {
                 accumulator: b.after_inbox_acc,
                 message_count: msg_count_for_batch,
