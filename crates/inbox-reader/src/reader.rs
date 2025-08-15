@@ -280,12 +280,25 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             }
 
             if missing_sequencer || reorging_sequencer {
-                let batches = self
+                let mut batches = self
                     .sequencer_inbox
                     .lookup_batches_in_range(from, to_block)
                     .await
                     .unwrap_or_default();
                 if !batches.is_empty() {
+                    for b in batches.iter_mut() {
+                        let (bytes, block_hash) = {
+                            let (data, blk_hash, _seen) = self
+                                .sequencer_inbox
+                                .get_sequencer_message_bytes_in_block(b.parent_chain_block_number, b.sequence_number)
+                                .await?;
+                            (data, blk_hash)
+                        };
+                        b.serialized = bytes;
+                        if b.block_hash == alloy_primitives::B256::ZERO {
+                            b.block_hash = block_hash;
+                        }
+                    }
                     self.tracker.add_sequencer_batches_and_stream(&batches)?;
                     info!("inbox_reader: fetched {} sequencer batches", batches.len());
                     fetched_any = true;
@@ -296,15 +309,23 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             self.last_read_batch_count.store(checking_batch_count, Ordering::Relaxed);
             self.last_seen_batch_count.store(seen_batch_count, Ordering::Relaxed);
 
-            if fetched_any {
-                from = to_block.saturating_add(1);
-            } else if reorging_delayed || reorging_sequencer {
+            let have_messages: u64 = (delayed.len() as u64) + (batches.len() as u64);
+            if have_messages <= (cfg.target_messages_read / 2) {
+                blocks_to_fetch = blocks_to_fetch.saturating_add((blocks_to_fetch + 4) / 5);
+            } else if have_messages >= (cfg.target_messages_read.saturating_mul(3) / 2) {
+                blocks_to_fetch = blocks_to_fetch.saturating_sub((blocks_to_fetch + 4) / 5);
+            }
+            if blocks_to_fetch < 1 {
+                blocks_to_fetch = 1;
+            } else if blocks_to_fetch > cfg.max_blocks_to_read {
+                blocks_to_fetch = cfg.max_blocks_to_read;
+            }
+
+            if reorging_delayed || reorging_sequencer {
                 let prev = self.get_prev_block_for_reorg(from, blocks_to_fetch)?;
                 from = prev;
-                blocks_to_fetch = 1;
             } else {
                 from = to_block.saturating_add(1);
-                blocks_to_fetch = (blocks_to_fetch / 2).max(cfg.min_blocks_to_read);
             }
         }
         #[allow(unreachable_code)]
