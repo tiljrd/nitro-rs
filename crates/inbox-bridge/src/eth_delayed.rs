@@ -118,16 +118,15 @@ impl DelayedBridge for EthDelayedBridge {
             "to": to_hex.clone(),
             "from": from_hex,
             "data": format!("0x{}", hex::encode(&data)),
-        }, block_id])).await?
+        }, block_id])).await?;
         let mut res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             let impl_addr = crate::util::proxy_impl_address(&self.rpc, self.bridge_addr).await?;
             let impl_hex = format!("{:#x}", impl_addr);
-            let block_tag = format!("0x{:x}", block_number);
             let res2_hex: String = self.rpc.call("eth_call", json!([{
                 "to": impl_hex,
                 "data": format!("0x{}", hex::encode(&data)),
-            }, block_tag])).await?;
+            }, block_id])).await?;
             res = hex::decode(res2_hex.trim_start_matches("0x"))?;
             if res.len() < 32 {
                 anyhow::bail!("short returndata for delayedInboxAccs")
