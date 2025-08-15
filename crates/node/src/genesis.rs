@@ -174,7 +174,7 @@ impl GenesisBootstrap {
         genesis.difficulty = U256::from(1u64);
         genesis.timestamp = 0;
         genesis.gas_limit = L2_GAS_LIMIT;
-        genesis.base_fee_per_gas = Some(parsed.initial_l1_base_fee.to::<u128>());
+        genesis.base_fee_per_gas = Some(INITIAL_BASE_FEE_WEI as u128);
         genesis.mix_hash = B256::ZERO;
         genesis.coinbase = Address::ZERO;
         genesis.config.chain_id = chain_id.into();
