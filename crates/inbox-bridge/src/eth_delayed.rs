@@ -78,7 +78,7 @@ impl DelayedBridge for EthDelayedBridge {
             "to": to_hex,
             "from": from_hex,
             "data": format!("0x{}", hex::encode(data)),
-        }, "latest"])).await?
+        }, "latest"])).await?;
         let res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             anyhow::bail!("short returndata for delayedMessageCount")
@@ -97,7 +97,7 @@ impl DelayedBridge for EthDelayedBridge {
             "to": to_hex,
             "from": from_hex,
             "data": format!("0x{}", hex::encode(data)),
-        }, "latest"])).await?
+        }, "latest"])).await?;
         let res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             anyhow::bail!("short returndata for delayedInboxAccs")
