@@ -109,7 +109,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                     tokio::select! {
                         v = headers_rx.recv() => {
                             if v.is_none() {
-                                return Ok(());
+                                break;
                             }
                             let block_num2 = if read_mode == "safe" {
                                 self.l1_reader.latest_safe_block_nr().await?
@@ -138,7 +138,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                     tokio::select! {
                         v = headers_rx.recv() => {
                             if v.is_none() {
-                                return Ok(());
+                                break;
                             }
                             if let Some(h) = v {
                                 current_height = h.number;
