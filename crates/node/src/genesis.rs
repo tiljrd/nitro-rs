@@ -43,9 +43,7 @@ const INITIAL_PRICING_INERTIA: u64 = 102;
 const INITIAL_BACKLOG_TOLERANCE: u64 = 10;
 
 fn be_u256(val: U256) -> B256 {
-    let mut out = [0u8; 32];
-    val.to_be_bytes(&mut out);
-    B256::from(out)
+    B256::from(val.to_be_bytes::<32>())
 }
 
 fn be_u64(val: u64) -> B256 {
