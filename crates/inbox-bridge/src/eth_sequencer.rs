@@ -2,7 +2,7 @@ use crate::rpc::RpcClient;
 use crate::traits::SequencerInbox;
 use crate::types::SequencerInboxBatch;
 use crate::selectors::{
-    SIG_BATCH_COUNT, SIG_INBOX_ACCS, EVT_SEQUENCER_BATCH_DELIVERED, EVT_SEQUENCER_BATCH_DATA,
+    SIG_BATCH_COUNT, SIG_INBOX_ACCS, TOPIC_SEQUENCER_BATCH_DELIVERED, TOPIC_SEQUENCER_BATCH_DATA,
 };
 use alloy_primitives::{keccak256, Address, B256, U256};
 use async_trait::async_trait;
@@ -118,7 +118,7 @@ impl SequencerInbox for EthSequencerInbox {
     }
 
     async fn lookup_batches_in_range(&self, from_block: u64, to_block: u64) -> anyhow::Result<Vec<SequencerInboxBatch>> {
-        let topic0: B256 = keccak256(EVT_SEQUENCER_BATCH_DELIVERED.as_bytes());
+        let topic0: B256 = B256::from_str(TOPIC_SEQUENCER_BATCH_DELIVERED).unwrap();
         let filter = json!({
             "fromBlock": format!("0x{:x}", from_block),
             "toBlock": format!("0x{:x}", to_block),
@@ -190,7 +190,7 @@ impl SequencerInbox for EthSequencerInbox {
         block_number: u64,
         seq_num: u64,
     ) -> anyhow::Result<(Vec<u8>, B256, Vec<u64>)> {
-        let topic0: B256 = keccak256(EVT_SEQUENCER_BATCH_DATA.as_bytes());
+        let topic0: B256 = B256::from_str(TOPIC_SEQUENCER_BATCH_DATA).unwrap();
         let mut topic1_bytes = [0u8; 32];
         topic1_bytes[24..32].copy_from_slice(&seq_num.to_be_bytes());
         let topic1 = B256::from_slice(&topic1_bytes);
