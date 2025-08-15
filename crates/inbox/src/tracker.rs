@@ -351,35 +351,50 @@ impl<D: Database> InboxTracker<D> {
         };
 
         if db_count != prev_meta.message_count {
-            match self.find_inbox_batch_containing_message(db_count) {
-                Ok((batch_idx, ok)) if ok => {
-                    if batch_idx == first_seq {
-                        tracing::info!(
-                            "inbox_tracker: aligning prev_meta.message_count from {} -> {} for first_seq={}",
-                            prev_meta.message_count,
-                            db_count,
-                            first_seq
-                        );
-                        prev_meta.message_count = db_count;
-                        if prev_meta.delayed_message_count == 0 {
-                            if let Ok(cur_delayed) = self.get_delayed_count() {
-                                last_delayed_for_mux = cur_delayed;
+            let batch_count = self.get_batch_count().unwrap_or(0);
+            if batch_count == 0 && first_seq == 0 && db_count > 0 {
+                tracing::info!(
+                    "inbox_tracker: cold-start align prev_meta.message_count from {} -> {} (no batch metadata, first_seq=0)",
+                    prev_meta.message_count,
+                    db_count
+                );
+                prev_meta.message_count = db_count;
+                if prev_meta.delayed_message_count == 0 {
+                    if let Ok(cur_delayed) = self.get_delayed_count() {
+                        last_delayed_for_mux = cur_delayed;
+                    }
+                }
+            } else {
+                match self.find_inbox_batch_containing_message(db_count) {
+                    Ok((batch_idx, ok)) if ok => {
+                        if batch_idx == first_seq {
+                            tracing::info!(
+                                "inbox_tracker: aligning prev_meta.message_count from {} -> {} for first_seq={}",
+                                prev_meta.message_count,
+                                db_count,
+                                first_seq
+                            );
+                            prev_meta.message_count = db_count;
+                            if prev_meta.delayed_message_count == 0 {
+                                if let Ok(cur_delayed) = self.get_delayed_count() {
+                                    last_delayed_for_mux = cur_delayed;
+                                }
                             }
+                        } else {
+                            tracing::warn!(
+                                "inbox_tracker: batch_idx {} for db_count {} does not match first_seq {}; skipping window",
+                                batch_idx, db_count, first_seq
+                            );
+                            return Ok(());
                         }
-                    } else {
+                    }
+                    _ => {
                         tracing::warn!(
-                            "inbox_tracker: batch_idx {} for db_count {} does not match first_seq {}; skipping window",
-                            batch_idx, db_count, first_seq
+                            "inbox_tracker: could not map db_count {} to a batch; skipping window",
+                            db_count
                         );
                         return Ok(());
                     }
-                }
-                _ => {
-                    tracing::warn!(
-                        "inbox_tracker: could not map db_count {} to a batch; skipping window",
-                        db_count
-                    );
-                    return Ok(());
                 }
             }
         }
