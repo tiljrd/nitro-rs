@@ -147,7 +147,7 @@ impl DelayedBridge for EthDelayedBridge {
 
         let mut inbox_addresses: BTreeSet<Address> = BTreeSet::new();
         let mut message_ids: Vec<B256> = Vec::with_capacity(logs.len());
-        let mut parsed: Vec<(DelayedInboxMessage, Address, B256)> = Vec::with_capacity(logs.len());
+        let mut parsed: Vec<(DelayedInboxMessage, Address, B256, B256)> = Vec::with_capacity(logs.len());
 
         for lg in logs {
             let data_bytes = hex::decode(lg.data.trim_start_matches("0x"))?;
@@ -161,7 +161,7 @@ impl DelayedBridge for EthDelayedBridge {
             let inbox_addr = Address::from_slice(&data_bytes[12..32]);
             let kind = u8::try_from(Self::decode_u256_word(&data_bytes[32..64])?.to::<u64>()).unwrap_or(0);
             let sender = Address::from_slice(&data_bytes[64 + 12..64 + 32]);
-            let _message_data_hash = B256::from_slice(&data_bytes[96..128]);
+            let message_data_hash = B256::from_slice(&data_bytes[96..128]);
             let basefee = Self::decode_u256_word(&data_bytes[128..160])?;
             let timestamp = Self::decode_u256_word(&data_bytes[160..192])?.to::<u64>();
 
@@ -186,7 +186,7 @@ impl DelayedBridge for EthDelayedBridge {
             };
             inbox_addresses.insert(inbox_addr);
             message_ids.push(msg_index_b256);
-            parsed.push((dim, inbox_addr, msg_index_b256));
+            parsed.push((dim, inbox_addr, msg_index_b256, message_data_hash));
         }
 
         if parsed.is_empty() {
@@ -252,10 +252,13 @@ impl DelayedBridge for EthDelayedBridge {
         }
 
         let mut out: Vec<DelayedInboxMessage> = Vec::with_capacity(parsed.len());
-        for (mut dim, _inbox, req_id) in parsed {
-            if let Some(data) = data_by_id.get(&req_id) {
-                dim.message.l2msg = data.clone();
+        for (mut dim, _inbox, req_id, expected_hash) in parsed {
+            let data = data_by_id.get(&req_id).ok_or_else(|| anyhow::anyhow!(format!("message {} data not found", U256::from_be_bytes(req_id.0))))?;
+            let found_hash = B256::from(keccak256(&data));
+            if found_hash != expected_hash {
+                return Err(anyhow::anyhow!(format!("found message {} data with mismatched hash: expected {:#x} got {:#x}", U256::from_be_bytes(req_id.0), expected_hash, found_hash)));
             }
+            dim.message.l2msg = data.clone();
             out.push(dim);
         }
 
