@@ -135,19 +135,12 @@ impl SequencerInbox for EthSequencerInbox {
         
         let mut out = Vec::with_capacity(logs.len());
         
-        let mut last_seq: Option<u64> = None;
         for lg in logs {
             let data_bytes = hex::decode(lg.data.trim_start_matches("0x"))?;
             if lg.topics.len() < 3 || data_bytes.len() < 32 * 8 {
                 continue;
             }
             let seq = U256::from_be_bytes(B256::from_str(&lg.topics[1]).unwrap_or_default().0).to::<u64>();
-            if let Some(prev) = last_seq {
-                if seq != prev + 1 {
-                    anyhow::bail!("batches out of order: after {} got {}", prev, seq)
-                }
-            }
-            last_seq = Some(seq);
 
             let before_acc = B256::from_str(&lg.topics[2]).unwrap_or_default();
             let after_acc = Self::decode_b256_word(&data_bytes[0..32])?;
