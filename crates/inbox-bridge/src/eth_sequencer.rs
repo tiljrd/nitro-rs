@@ -134,34 +134,47 @@ impl SequencerInbox for EthSequencerInbox {
         info!("eth_sequencer: lookup_batches_in_range from={} to={} addr={} topic0={}", from_block, to_block, format!("{:#x}", self.inbox_addr), format!("{:#x}", topic0));
         let logs: Vec<RpcLog> = self.rpc.call("eth_getLogs", json!([filter])).await?;
         info!("eth_sequencer: raw SequencerBatchDelivered logs fetched: {}", logs.len());
-        
+
         let mut out = Vec::with_capacity(logs.len());
-        
+
         for lg in logs {
             let data_bytes = hex::decode(lg.data.trim_start_matches("0x"))?;
-            if lg.topics.len() < 3 || data_bytes.len() < 32 * 8 {
+            let topics_len = lg.topics.len();
+            if topics_len < 3 || data_bytes.len() < 32 * 7 {
                 continue;
             }
+
             let seq = U256::from_be_bytes(B256::from_str(&lg.topics[1]).unwrap_or_default().0).to::<u64>();
-
             let before_acc = B256::from_str(&lg.topics[2]).unwrap_or_default();
-            let after_acc = Self::decode_b256_word(&data_bytes[0..32])?;
 
-            let delayed_acc = Self::decode_b256_word(&data_bytes[32..64])?;
-            let after_delayed_count = Self::decode_u256_word(&data_bytes[64..96])?.to::<u64>();
+            let (after_acc, delayed_acc, after_delayed_count, min_ts, max_ts, min_bn, max_bn, data_loc_u256) = if topics_len >= 4 {
+                let after_acc = B256::from_str(&lg.topics[3]).unwrap_or_default();
+                let delayed_acc = Self::decode_b256_word(&data_bytes[0..32])?;
+                let after_delayed_count = Self::decode_u256_word(&data_bytes[32..64])?.to::<u64>();
+                let min_ts = Self::decode_u256_word(&data_bytes[64..96])?.to::<u64>();
+                let max_ts = Self::decode_u256_word(&data_bytes[96..128])?.to::<u64>();
+                let min_bn = Self::decode_u256_word(&data_bytes[128..160])?.to::<u64>();
+                let max_bn = Self::decode_u256_word(&data_bytes[160..192])?.to::<u64>();
+                let data_loc_u256 = Self::decode_u256_word(&data_bytes[192..224])?;
+                (after_acc, delayed_acc, after_delayed_count, min_ts, max_ts, min_bn, max_bn, data_loc_u256)
+            } else {
+                let after_acc = Self::decode_b256_word(&data_bytes[0..32])?;
+                let delayed_acc = Self::decode_b256_word(&data_bytes[32..64])?;
+                let after_delayed_count = Self::decode_u256_word(&data_bytes[64..96])?.to::<u64>();
+                let min_ts = Self::decode_u256_word(&data_bytes[96..128])?.to::<u64>();
+                let max_ts = Self::decode_u256_word(&data_bytes[128..160])?.to::<u64>();
+                let min_bn = Self::decode_u256_word(&data_bytes[160..192])?.to::<u64>();
+                let max_bn = Self::decode_u256_word(&data_bytes[192..224])?.to::<u64>();
+                let data_loc_u256 = Self::decode_u256_word(&data_bytes[224..256])?;
+                (after_acc, delayed_acc, after_delayed_count, min_ts, max_ts, min_bn, max_bn, data_loc_u256)
+            };
 
-            let min_ts = Self::decode_u256_word(&data_bytes[96..128])?.to::<u64>();
-            let max_ts = Self::decode_u256_word(&data_bytes[128..160])?.to::<u64>();
-            let min_bn = Self::decode_u256_word(&data_bytes[160..192])?.to::<u64>();
-            let max_bn = Self::decode_u256_word(&data_bytes[192..224])?.to::<u64>();
             let time_bounds = crate::types::TimeBounds {
                 min_timestamp: min_ts,
                 max_timestamp: max_ts,
                 min_block_number: min_bn,
                 max_block_number: max_bn,
             };
-
-            let data_loc_u256 = Self::decode_u256_word(&data_bytes[224..256])?;
             let data_location: u8 = (data_loc_u256 & U256::from(0xff)).to::<u8>();
 
             let batch = SequencerInboxBatch {
