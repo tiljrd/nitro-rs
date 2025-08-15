@@ -232,7 +232,13 @@ impl NitroNode {
             sequencer_inbox_addr,
         ).await?);
 
-        let reader_config: nitro_inbox_reader::reader::InboxReaderConfigFetcher = Arc::new(|| nitro_inbox_reader::reader::InboxReaderConfig::default());
+        let reader_config: nitro_inbox_reader::reader::InboxReaderConfigFetcher = Arc::new(|| {
+            let mut cfg = nitro_inbox_reader::reader::InboxReaderConfig::default();
+            cfg.check_delay_ms = 5_000;
+            cfg.default_blocks_to_read = 200;
+            cfg.max_blocks_to_read = 5000;
+            cfg
+        });
 
         let tracker = Arc::new(nitro_inbox::tracker::InboxTracker::new(db.clone(), streamer_trait.clone()));
         tracker.initialize()?;
