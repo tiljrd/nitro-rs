@@ -289,10 +289,10 @@ impl<D: Database> TransactionStreamer<D> {
     pub async fn execute_next_msg(&self) -> Result<bool> {
         let consensus_head = self.get_head_message_index()?;
         let exec_head = self.exec.head_message_index().await?;
-        if exec_head >= consensus_head {
+        let msg_idx = if exec_head == u64::MAX { 0 } else { exec_head + 1 };
+        if msg_idx > consensus_head {
             return Ok(false);
         }
-        let msg_idx = exec_head + 1;
         let msg_and_block = self.get_message_with_metadata_and_block_info(msg_idx)?;
         let mut msg_for_prefetch: Option<MessageWithMetadata> = None;
         if msg_idx + 1 <= consensus_head {

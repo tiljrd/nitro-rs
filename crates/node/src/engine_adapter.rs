@@ -56,9 +56,22 @@ impl ExecEngine for RethExecEngine {
         let count = <u64 as alloy_rlp::Decodable>::decode(&mut slice)
             .map_err(|e| anyhow!("failed to decode message count: {e}"))?;
         if count == 0 {
-            return Ok(0);
+            return Ok(u64::MAX);
         }
-        Ok(count - 1)
+        let mut i = count - 1;
+        loop {
+            let key = db_key(MESSAGE_RESULT_PREFIX, i);
+            match self.db.has(&key)? {
+                true => return Ok(i),
+                false => {
+                    if i == 0 {
+                        break;
+                    }
+                    i -= 1;
+                }
+            }
+        }
+        Ok(u64::MAX)
     }
 
     async fn digest_message(
@@ -76,17 +89,18 @@ impl ExecEngine for RethExecEngine {
             .as_ref()
             .ok_or_else(|| anyhow!("missing payload builder handle"))?;
 
-        if msg_idx == 0 {
-            return Err(anyhow!("cannot determine parent for first message index 0"));
-        }
-        let prev_key = db_key(MESSAGE_RESULT_PREFIX, msg_idx - 1);
-        let prev = {
-            let data = self.db.get(&prev_key)?;
-            let mut slice = data.as_slice();
-            MessageResult::decode(&mut slice)
-                .map_err(|e| anyhow!("failed to decode prev MessageResult: {e}"))?
+        let parent_hash = if msg_idx == 0 {
+            B256::ZERO
+        } else {
+            let prev_key = db_key(MESSAGE_RESULT_PREFIX, msg_idx - 1);
+            let prev = {
+                let data = self.db.get(&prev_key)?;
+                let mut slice = data.as_slice();
+                MessageResult::decode(&mut slice)
+                    .map_err(|e| anyhow!("failed to decode prev MessageResult: {e}"))?
+            };
+            prev.block_hash
         };
-        let parent_hash = prev.block_hash;
 
         let rpc_attrs = EthPayloadAttributes {
             timestamp: msg.message.header.timestamp,
