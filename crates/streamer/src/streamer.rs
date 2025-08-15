@@ -306,9 +306,6 @@ impl<D: Database> TransactionStreamer<D> {
     pub async fn execute_next_msg(&self) -> Result<bool> {
         let consensus_head = self.get_head_message_index()?;
         tracing::info!("streamer: consensus_head={:?}", consensus_head);
-        if consensus_head == u64::MAX {
-            return Ok(false);
-        }
 
         let exec_head = self.exec.head_message_index().await?;
         tracing::info!("streamer: exec_head={:?}", exec_head);
@@ -316,12 +313,13 @@ impl<D: Database> TransactionStreamer<D> {
         let msg_idx = if exec_head == u64::MAX { 0 } else { exec_head + 1 };
         tracing::info!("streamer: next msg_idx to execute={:?}", msg_idx);
 
-        if msg_idx > consensus_head {
+        let message_count = self.get_message_count().unwrap_or(0);
+        if msg_idx >= message_count {
             return Ok(false);
         }
         let msg_and_block = self.get_message_with_metadata_and_block_info(msg_idx)?;
         let mut msg_for_prefetch: Option<MessageWithMetadata> = None;
-        if msg_idx + 1 <= consensus_head {
+        if msg_idx + 1 < message_count {
             msg_for_prefetch = Some(self.get_message(msg_idx + 1)?);
         }
         let res = self.exec.digest_message(
