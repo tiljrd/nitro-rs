@@ -1,6 +1,9 @@
 use crate::rpc::RpcClient;
 use crate::traits::SequencerInbox;
 use crate::types::SequencerInboxBatch;
+use crate::selectors::{
+    SIG_BATCH_COUNT, SIG_INBOX_ACCS, EVT_SEQUENCER_BATCH_DELIVERED, EVT_SEQUENCER_BATCH_DATA,
+};
 use alloy_primitives::{keccak256, Address, B256, U256};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -60,13 +63,14 @@ impl SequencerInbox for EthSequencerInbox {
     async fn get_batch_count(&self, block_number: u64) -> anyhow::Result<u64> {
         info!("eth_sequencer: get_batch_count at block {}", block_number);
         let mut data = Vec::with_capacity(4);
-        data.extend_from_slice(&Self::encode_selector("batchCount()"));
+        data.extend_from_slice(&Self::encode_selector(SIG_BATCH_COUNT));
         let to_hex = format!("{:#x}", self.inbox_addr);
-        let block_tag = format!("0x{:x}", block_number);
+        let from_hex = "0x0000000000000000000000000000000000000001";
         let res_hex: String = self.rpc.call("eth_call", json!([{
             "to": to_hex,
+            "from": from_hex,
             "data": format!("0x{}", hex::encode(data)),
-        }, block_tag])).await?;
+        }, "latest"])).await?;
         let res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             anyhow::bail!("short returndata for batchCount")
@@ -78,14 +82,15 @@ impl SequencerInbox for EthSequencerInbox {
     async fn get_accumulator(&self, seq_num: u64, block_number: u64) -> anyhow::Result<B256> {
         info!("eth_sequencer: get_accumulator seq={} block={}", seq_num, block_number);
         let mut data = Vec::with_capacity(4 + 32);
-        data.extend_from_slice(&Self::encode_selector("inboxAccs(uint256)"));
+        data.extend_from_slice(&Self::encode_selector(SIG_INBOX_ACCS));
         data.extend_from_slice(&Self::encode_u256(U256::from(seq_num)));
         let to_hex = format!("{:#x}", self.inbox_addr);
-        let block_tag = format!("0x{:x}", block_number);
+        let from_hex = "0x0000000000000000000000000000000000000001";
         let res_hex: String = self.rpc.call("eth_call", json!([{
             "to": to_hex,
+            "from": from_hex,
             "data": format!("0x{}", hex::encode(data)),
-        }, block_tag])).await?;
+        }, "latest"])).await?;
         let res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             anyhow::bail!("short returndata for inboxAccs")
@@ -94,10 +99,7 @@ impl SequencerInbox for EthSequencerInbox {
     }
 
     async fn lookup_batches_in_range(&self, from_block: u64, to_block: u64) -> anyhow::Result<Vec<SequencerInboxBatch>> {
-        let topic0: B256 = keccak256(
-            "SequencerBatchDelivered(uint256,bytes32,bytes32,bytes32,uint256,(uint64,uint64,uint64,uint64),uint8)"
-                .as_bytes(),
-        );
+        let topic0: B256 = keccak256(EVT_SEQUENCER_BATCH_DELIVERED.as_bytes());
         let filter = json!({
             "fromBlock": format!("0x{:x}", from_block),
             "toBlock": format!("0x{:x}", to_block),
@@ -167,7 +169,7 @@ impl SequencerInbox for EthSequencerInbox {
         block_number: u64,
         seq_num: u64,
     ) -> anyhow::Result<(Vec<u8>, B256, Vec<u64>)> {
-        let topic0: B256 = keccak256("SequencerBatchData(uint256,bytes)".as_bytes());
+        let topic0: B256 = keccak256(EVT_SEQUENCER_BATCH_DATA.as_bytes());
         let mut topic1_bytes = [0u8; 32];
         topic1_bytes[24..32].copy_from_slice(&seq_num.to_be_bytes());
         let topic1 = B256::from_slice(&topic1_bytes);

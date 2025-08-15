@@ -1,6 +1,10 @@
 use crate::rpc::RpcClient;
 use crate::traits::DelayedBridge;
 use crate::types::DelayedInboxMessage;
+use crate::selectors::{
+    SIG_DELAYED_COUNT, SIG_DELAYED_INBOX_ACCS, SIG_SEND_L2_FROM_ORIGIN,
+    EVT_MESSAGE_DELIVERED, EVT_INBOX_MESSAGE_DELIVERED, EVT_INBOX_MESSAGE_FROM_ORIGIN,
+};
 use alloy_primitives::{keccak256, Address, B256, U256};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -66,13 +70,14 @@ impl EthDelayedBridge {
 impl DelayedBridge for EthDelayedBridge {
     async fn get_message_count(&self, block_number: u64) -> anyhow::Result<u64> {
         let mut data = Vec::with_capacity(4);
-        data.extend_from_slice(&Self::encode_selector("delayedMessageCount()"));
+        data.extend_from_slice(&Self::encode_selector(SIG_DELAYED_COUNT));
         let to_hex = format!("{:#x}", self.bridge_addr);
-        let block_tag = format!("0x{:x}", block_number);
+        let from_hex = "0x0000000000000000000000000000000000000001";
         let res_hex: String = self.rpc.call("eth_call", json!([{
             "to": to_hex,
+            "from": from_hex,
             "data": format!("0x{}", hex::encode(data)),
-        }, block_tag])).await?;
+        }, "latest"])).await?;
         let res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             anyhow::bail!("short returndata for delayedMessageCount")
@@ -83,14 +88,15 @@ impl DelayedBridge for EthDelayedBridge {
 
     async fn get_accumulator(&self, seq_num: u64, block_number: u64, _block_hash: B256) -> anyhow::Result<B256> {
         let mut data = Vec::with_capacity(4 + 32);
-        data.extend_from_slice(&Self::encode_selector("delayedInboxAccs(uint256)"));
+        data.extend_from_slice(&Self::encode_selector(SIG_DELAYED_INBOX_ACCS));
         data.extend_from_slice(&Self::encode_u256(U256::from(seq_num)));
         let to_hex = format!("{:#x}", self.bridge_addr);
-        let block_tag = format!("0x{:x}", block_number);
+        let from_hex = "0x0000000000000000000000000000000000000001";
         let res_hex: String = self.rpc.call("eth_call", json!([{
             "to": to_hex,
+            "from": from_hex,
             "data": format!("0x{}", hex::encode(data)),
-        }, block_tag])).await?;
+        }, "latest"])).await?;
         let res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             anyhow::bail!("short returndata for delayedInboxAccs")
@@ -107,8 +113,7 @@ impl DelayedBridge for EthDelayedBridge {
     where
         F: Fn(u64) -> anyhow::Result<Vec<u8>> + Send + Sync,
     {
-        let message_delivered_topic: B256 =
-            keccak256("MessageDelivered(uint256,bytes32,address,uint8,address,bytes32,uint256,uint64)".as_bytes());
+        let message_delivered_topic: B256 = keccak256(EVT_MESSAGE_DELIVERED.as_bytes());
         let filter = json!({
             "fromBlock": format!("0x{:x}", from_block),
             "toBlock": format!("0x{:x}", to_block),
@@ -164,8 +169,8 @@ impl DelayedBridge for EthDelayedBridge {
             return Ok(Vec::new());
         }
 
-        let inbox_msg_delivered: B256 = keccak256("InboxMessageDelivered(uint256,bytes)".as_bytes());
-        let inbox_msg_from_origin: B256 = keccak256("InboxMessageDeliveredFromOrigin(uint256)".as_bytes());
+        let inbox_msg_delivered: B256 = keccak256(EVT_INBOX_MESSAGE_DELIVERED.as_bytes());
+        let inbox_msg_from_origin: B256 = keccak256(EVT_INBOX_MESSAGE_FROM_ORIGIN.as_bytes());
 
         let mut data_by_id: HashMap<B256, Vec<u8>> = HashMap::with_capacity(message_ids.len());
         if !inbox_addresses.is_empty() {
@@ -204,7 +209,7 @@ impl DelayedBridge for EthDelayedBridge {
                         let input = hex::decode(tx.input.trim_start_matches("0x"))?;
                         if input.len() >= 4 + 32 {
                             let selector = &input[0..4];
-                            let expected = Self::encode_selector("sendL2MessageFromOrigin(bytes)");
+                            let expected = Self::encode_selector(SIG_SEND_L2_FROM_ORIGIN);
                             if selector == expected {
                                 if input.len() >= 4 + 64 {
                                     let mut len_bytes = [0u8; 32];

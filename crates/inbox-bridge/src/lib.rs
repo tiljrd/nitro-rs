@@ -1,3 +1,4 @@
+pub mod selectors;
 pub mod traits;
 pub mod types;
 pub mod rpc;
