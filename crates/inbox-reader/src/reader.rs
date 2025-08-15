@@ -398,6 +398,39 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                         }
                     }
                     if !good_batches.is_empty() {
+                        let need_delayed_to = good_batches.iter().map(|b| b.after_delayed_count).max().unwrap_or(0);
+                        let have_delayed = self.tracker.get_delayed_count()?;
+                        if need_delayed_to > have_delayed {
+                            let start_seq = have_delayed.saturating_add(1);
+                            let start_block = self.recent_parent_chain_block_to_msg(start_seq).unwrap_or(from);
+                            let max_parent_block = good_batches.iter().map(|b| b.parent_chain_block_number).max().unwrap_or(to_block);
+                            let mut tuples: Vec<(u64, alloy_primitives::B256, Vec<u8>)> = Vec::new();
+                            match self
+                                .delayed_bridge
+                                .lookup_messages_in_range(start_block, max_parent_block, |_b| Ok(Vec::new()))
+                                .await
+                            {
+                                Ok(delayed) => {
+                                    for m in delayed {
+                                        let bytes = serialize_incoming_l1_message_legacy(&m.message)?;
+                                        tuples.push((m.seq_num, m.before_inbox_acc, bytes));
+                                    }
+                                    if !tuples.is_empty() {
+                                        if let Err(e) = self.tracker.add_delayed_messages(&tuples, None) {
+                                            info!("inbox_reader: backfill add_delayed_messages error: {}", e);
+                                        } else {
+                                            info!("inbox_reader: backfilled {} delayed messages up to {}", tuples.len(), need_delayed_to);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    info!("inbox_reader: delayed backfill lookup_messages_in_range error: {}", e);
+                                }
+                            }
+                        }
+                    }
+
+                    if !good_batches.is_empty() {
                         if let Err(e) = self.tracker.add_sequencer_batches_and_stream(&good_batches) {
                             info!("inbox_reader: add_sequencer_batches_and_stream error: {}", e);
                         } else {
