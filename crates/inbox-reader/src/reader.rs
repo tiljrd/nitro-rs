@@ -172,7 +172,15 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             let mut missing_sequencer = false;
 
             {
-                let mut checking_delayed_count = self.delayed_bridge.get_message_count(current_height).await?;
+                info!("inbox_reader: querying delayed.get_message_count at l1_height={}", current_height);
+                let checking_delayed_count = match self.delayed_bridge.get_message_count(current_height).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        info!("inbox_reader: delayed.get_message_count error: {}", e);
+                        0
+                    }
+                };
+                let mut checking_delayed_count = checking_delayed_count;
                 let our_latest_delayed = self.tracker.get_delayed_count()?;
                 if our_latest_delayed < checking_delayed_count {
                     checking_delayed_count = our_latest_delayed;
@@ -182,7 +190,14 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                 }
                 if checking_delayed_count > 0 {
                     let checking_delayed_seq = checking_delayed_count - 1;
-                    let l1_delayed_acc = self.delayed_bridge.get_accumulator(checking_delayed_seq, current_height, alloy_primitives::B256::ZERO).await?;
+                    info!("inbox_reader: querying delayed.get_accumulator seq={} l1_height={}", checking_delayed_seq, current_height);
+                    let l1_delayed_acc = match self.delayed_bridge.get_accumulator(checking_delayed_seq, current_height, alloy_primitives::B256::ZERO).await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            info!("inbox_reader: delayed.get_accumulator error: {}", e);
+                            alloy_primitives::B256::ZERO
+                        }
+                    };
                     let db_delayed_acc = self.tracker.get_delayed_acc(checking_delayed_seq)?;
                     if db_delayed_acc != l1_delayed_acc {
                         reorging_delayed = true;
@@ -192,6 +207,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             }
 
             let mut checking_batch_count: u64 = 0;
+            info!("inbox_reader: querying sequencer.get_batch_count at l1_height={}", current_height);
             let seen_batch_res = self.sequencer_inbox.get_batch_count(current_height).await;
             match seen_batch_res {
                 Ok(cnt) => {
@@ -203,7 +219,14 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                     checking_batch_count = our_latest_batch.min(seen_batch_count);
                     if checking_batch_count > 0 {
                         let checking_batch_seq = checking_batch_count - 1;
-                        let l1_batch_acc = self.sequencer_inbox.get_accumulator(checking_batch_seq, current_height).await?;
+                        info!("inbox_reader: querying sequencer.get_accumulator seq={} l1_height={}", checking_batch_seq, current_height);
+                        let l1_batch_acc = match self.sequencer_inbox.get_accumulator(checking_batch_seq, current_height).await {
+                            Ok(v) => v,
+                            Err(e) => {
+                                info!("inbox_reader: sequencer.get_accumulator error: {}", e);
+                                alloy_primitives::B256::ZERO
+                            }
+                        };
                         let db_batch_acc = self.tracker.get_batch_acc(checking_batch_seq)?;
                         if db_batch_acc != l1_batch_acc {
                             reorging_sequencer = true;
@@ -212,10 +235,10 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                     }
                     info!("inbox_reader: sequencer our_latest={} l1_seen={} checking={}", our_latest_batch, seen_batch_count, checking_batch_count);
                 }
-                Err(_) => {
+                Err(e) => {
                     seen_batch_count = self.tracker.get_batch_count()?;
                     checking_batch_count = seen_batch_count;
-                    info!("inbox_reader: sequencer get_batch_count failed; using db count {}", seen_batch_count);
+                    info!("inbox_reader: sequencer get_batch_count error: {}; using db count {}", e, seen_batch_count);
                     missing_sequencer = true;
                 }
             }
