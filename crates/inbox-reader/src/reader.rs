@@ -463,11 +463,10 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                             } else {
                                 batches_len = filtered.len() as u64;
                                 info!("inbox_reader: fetched {} sequencer batches", batches_len);
-                            }
-                        }
-                            fetched_any = true;
-                            if let Some(last) = good_batches.last() {
-                                seen_batch_count = seen_batch_count.max(last.sequence_number + 1);
+                                fetched_any = true;
+                                if let Some(last) = filtered.last() {
+                                    seen_batch_count = seen_batch_count.max(last.sequence_number + 1);
+                                }
                             }
                         }
                     }
