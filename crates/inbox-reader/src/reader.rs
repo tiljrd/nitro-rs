@@ -409,7 +409,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                         let need_delayed_to = good_batches.iter().map(|b| b.after_delayed_count).max().unwrap_or(0);
                         let have_delayed = self.tracker.get_delayed_count()?;
                         if need_delayed_to > have_delayed {
-                            let start_seq = have_delayed.saturating_add(1);
+                            let start_seq = have_delayed;
                             let start_block = self.recent_parent_chain_block_to_msg(start_seq).unwrap_or(from);
                             let max_parent_block = good_batches.iter().map(|b| b.parent_chain_block_number).max().unwrap_or(to_block);
                             let mut tuples: Vec<(u64, alloy_primitives::B256, Vec<u8>)> = Vec::new();
