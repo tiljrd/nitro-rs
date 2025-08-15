@@ -159,9 +159,12 @@ pub fn delayed_message_body_hash(msg: &L1IncomingMessage) -> B256 {
     buf.extend_from_slice(&u64_min_be_bytes(msg.header.timestamp));
     if let Some(req) = msg.header.request_id {
         buf.extend_from_slice(req.as_slice());
-    } else {
     }
-    buf.extend_from_slice(&msg.header.l1_base_fee.to_be_bytes::<32>());
+    let mut base_fee_be = msg.header.l1_base_fee.to_be_bytes_vec();
+    while !base_fee_be.is_empty() && base_fee_be[0] == 0 {
+        base_fee_be.remove(0);
+    }
+    buf.extend_from_slice(&base_fee_be);
     let l2_hash = keccak256(&msg.l2msg);
     buf.extend_from_slice(l2_hash.as_slice());
     B256::from(keccak256(&buf))

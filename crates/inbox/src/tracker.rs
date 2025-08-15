@@ -380,6 +380,7 @@ impl<D: Database> InboxTracker<D> {
                     seqnum = *seqnum,
                     expected_before = ?before_acc,
                     have_before = ?next_acc,
+                    computed_after_prev = ?computed_after,
                     kind = msg.header.kind,
                     poster = %msg.header.poster,
                     block_number = msg.header.block_number,
@@ -390,6 +391,13 @@ impl<D: Database> InboxTracker<D> {
                     "previous delayed accumulator mismatch"
                 );
                 anyhow::bail!("previous delayed accumulator mismatch for message {}", seqnum);
+            } else {
+                tracing::info!(
+                    seqnum = *seqnum,
+                    before = ?before_acc,
+                    after = ?computed_after,
+                    "delayed message accumulator ok"
+                );
             }
             let mut data = next_acc.0.to_vec();
             data.extend_from_slice(msg_bytes);
