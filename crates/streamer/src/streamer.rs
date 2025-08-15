@@ -288,6 +288,9 @@ impl<D: Database> TransactionStreamer<D> {
     }
     pub async fn execute_next_msg(&self) -> Result<bool> {
         let consensus_head = self.get_head_message_index()?;
+        if consensus_head == u64::MAX {
+            return Ok(false);
+        }
         let exec_head = self.exec.head_message_index().await?;
         let msg_idx = if exec_head == u64::MAX { 0 } else { exec_head + 1 };
         if msg_idx > consensus_head {
