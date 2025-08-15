@@ -36,7 +36,8 @@ async fn main() -> anyhow::Result<()> {
             || arg.starts_with("--l1-rpc-url")
             || arg.starts_with("--sequencer-inbox")
             || arg.starts_with("--delayed-bridge")
-            || arg.starts_with("--first-message-block");
+            || arg.starts_with("--first-message-block")
+            || arg.starts_with("--chaininfo-file");
         if is_supported {
             let takes_value = arg.starts_with("--network")
                 || arg.starts_with("--sync-till-block")
@@ -48,7 +49,8 @@ async fn main() -> anyhow::Result<()> {
                 || arg.starts_with("--l1-rpc-url")
                 || arg.starts_with("--sequencer-inbox")
                 || arg.starts_with("--delayed-bridge")
-                || arg.starts_with("--first-message-block");
+                || arg.starts_with("--first-message-block")
+                || arg.starts_with("--chaininfo-file");
             filtered.push(arg.clone());
             if takes_value && !arg.contains('=') {
                 if let Some(val) = it.next() {

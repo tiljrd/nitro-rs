@@ -13,6 +13,10 @@ pub struct NodeArgs {
 
     #[arg(long = "first-message-block", env = "NITRO_FIRST_MESSAGE_BLOCK")]
     pub first_message_block: Option<u64>,
+
+    #[arg(long, env = "NITRO_CHAININFO_FILE")]
+    pub chaininfo_file: Option<String>,
+
     #[arg(long, env = "NITRO_NETWORK")]
     pub network: Option<String>,
 

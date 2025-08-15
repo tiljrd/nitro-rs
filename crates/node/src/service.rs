@@ -18,7 +18,7 @@ use reth_node_core::args::NetworkArgs;
 use reth_node_builder::NodeBuilder;
 use reth_arbitrum_node::{ArbNode, args::RollupArgs};
 use reth_tasks::TaskManager;
-use crate::addresses;
+use crate::chaininfo;
 
 pub struct NitroNode {
     pub args: NodeArgs,
@@ -170,6 +170,23 @@ impl NitroNode {
             Some("local") => 1337u64,
             Some(_) => 421_614u64,
         };
+
+        let chains = if let Some(path) = self.args.chaininfo_file.as_deref() {
+            let text = std::fs::read_to_string(path)?;
+            let vec: Vec<chaininfo::ChainInfo> = serde_json::from_str(&text)?;
+            chaininfo::Chains(vec)
+        } else {
+            chaininfo::load_embedded()?
+        };
+        let chain_entry = chains
+            .select_by_chain_id(chain_id)
+            .or_else(|| chains.select_by_name("sepolia-rollup"))
+            .ok_or_else(|| anyhow::anyhow!("sepolia chain info not found"))?;
+        let rollup = chain_entry.rollup.as_ref().ok_or_else(|| anyhow::anyhow!("rollup addresses missing"))?;
+        let json_bridge_addr = Address::from_str(&rollup.bridge)?;
+        let json_seq_inbox_addr = Address::from_str(&rollup.sequencer_inbox)?;
+        let json_deployed_at = rollup.deployed_at.unwrap_or(0);
+
         let mut spec = reth_chainspec::ChainSpec::default();
         spec.chain = Chain::from(chain_id);
         let net = NetworkArgs::default().with_unused_ports();
@@ -196,19 +213,13 @@ impl NitroNode {
 
         let delayed_bridge_addr = if let Some(a) = delayed_bridge_addr_opt {
             a
-        } else if matches!(self.args.network.as_deref(), Some("sepolia") | None) {
-            Address::from_str(addresses::ARB_SEPOLIA.bridge)?
         } else {
-            let delayed_bridge_addr_str = std::env::var("NITRO_DELAYED_BRIDGE")?;
-            Address::from_str(delayed_bridge_addr_str.trim())?
+            json_bridge_addr
         };
         let sequencer_inbox_addr = if let Some(a) = sequencer_inbox_addr_opt {
             a
-        } else if matches!(self.args.network.as_deref(), Some("sepolia") | None) {
-            Address::from_str(addresses::ARB_SEPOLIA.sequencer_inbox)?
         } else {
-            let sequencer_inbox_addr_str = std::env::var("NITRO_SEQUENCER_INBOX")?;
-            Address::from_str(sequencer_inbox_addr_str.trim())?
+            json_seq_inbox_addr
         };
 
         let delayed_bridge = Arc::new(inbox_bridge::eth_delayed::EthDelayedBridge::new_http(
@@ -232,7 +243,7 @@ impl NitroNode {
             std::env::var("NITRO_FIRST_MESSAGE_BLOCK")
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(0)
+                .unwrap_or(json_deployed_at)
         };
         let _ = nitro_rpc::register_backend(tracker.clone(), streamer_impl.clone());
 
