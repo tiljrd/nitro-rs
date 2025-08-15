@@ -315,13 +315,13 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
             self.last_seen_batch_count.store(seen_batch_count, Ordering::Relaxed);
 
             let have_messages: u64 = delayed_len + batches_len;
-            if have_messages <= (cfg.target_messages_read / 2) {
+            if have_messages == 0 {
                 blocks_to_fetch = blocks_to_fetch.saturating_add((blocks_to_fetch + 4) / 5);
             } else if have_messages >= (cfg.target_messages_read.saturating_mul(3) / 2) {
                 blocks_to_fetch = blocks_to_fetch.saturating_sub((blocks_to_fetch + 4) / 5);
             }
-            if blocks_to_fetch < 1 {
-                blocks_to_fetch = 1;
+            if blocks_to_fetch < cfg.min_blocks_to_read {
+                blocks_to_fetch = cfg.min_blocks_to_read;
             } else if blocks_to_fetch > cfg.max_blocks_to_read {
                 blocks_to_fetch = cfg.max_blocks_to_read;
             }
@@ -330,7 +330,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                 let prev = self.get_prev_block_for_reorg(from, blocks_to_fetch)?;
                 from = prev;
                 blocks_to_fetch = cfg.min_blocks_to_read;
-            } else {
+            } else if have_messages > 0 {
                 from = to_block.saturating_add(1);
             }
         }

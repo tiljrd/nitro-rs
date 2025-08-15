@@ -67,19 +67,21 @@ impl SequencerInbox for EthSequencerInbox {
         data.extend_from_slice(&Self::encode_selector(SIG_BATCH_COUNT));
         let to_hex = format!("{:#x}", self.inbox_addr);
         let from_hex = safe_from_for_proxy(&self.rpc, self.inbox_addr).await?;
+        let block_tag = format!("0x{:x}", block_number);
         let res_hex: String = self.rpc.call("eth_call", json!([{
             "to": to_hex.clone(),
             "from": from_hex,
             "data": format!("0x{}", hex::encode(&data)),
-        }, "latest"])).await?;
+        }, block_tag])).await?;
         let mut res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             let impl_addr = crate::util::proxy_impl_address(&self.rpc, self.inbox_addr).await?;
             let impl_hex = format!("{:#x}", impl_addr);
+            let block_tag = format!("0x{:x}", block_number);
             let res2_hex: String = self.rpc.call("eth_call", json!([{
                 "to": impl_hex,
                 "data": format!("0x{}", hex::encode(&data)),
-            }, "latest"])).await?;
+            }, block_tag])).await?;
             res = hex::decode(res2_hex.trim_start_matches("0x"))?;
             if res.len() < 32 {
                 anyhow::bail!("short returndata for batchCount")
@@ -96,19 +98,21 @@ impl SequencerInbox for EthSequencerInbox {
         data.extend_from_slice(&Self::encode_u256(U256::from(seq_num)));
         let to_hex = format!("{:#x}", self.inbox_addr);
         let from_hex = safe_from_for_proxy(&self.rpc, self.inbox_addr).await?;
+        let block_tag = format!("0x{:x}", block_number);
         let res_hex: String = self.rpc.call("eth_call", json!([{
             "to": to_hex.clone(),
             "from": from_hex,
             "data": format!("0x{}", hex::encode(&data)),
-        }, "latest"])).await?;
+        }, block_tag])).await?;
         let mut res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             let impl_addr = crate::util::proxy_impl_address(&self.rpc, self.inbox_addr).await?;
             let impl_hex = format!("{:#x}", impl_addr);
+            let block_tag = format!("0x{:x}", block_number);
             let res2_hex: String = self.rpc.call("eth_call", json!([{
                 "to": impl_hex,
                 "data": format!("0x{}", hex::encode(&data)),
-            }, "latest"])).await?;
+            }, block_tag])).await?;
             res = hex::decode(res2_hex.trim_start_matches("0x"))?;
             if res.len() < 32 {
                 anyhow::bail!("short returndata for inboxAccs")
