@@ -31,6 +31,11 @@ struct RpcLog {
 struct RpcTx {
     input: String,
 }
+#[derive(Deserialize)]
+struct RpcBlock {
+    number: String,
+}
+
 
 pub struct EthDelayedBridge {
     rpc: Arc<RpcClient>,
@@ -165,8 +170,13 @@ impl DelayedBridge for EthDelayedBridge {
             let basefee = Self::decode_u256_word(&data_bytes[128..160])?;
             let timestamp = Self::decode_u256_word(&data_bytes[160..192])?.to::<u64>();
 
-            let block_number = lg.blockNumber.as_deref().and_then(|h| u64::from_str_radix(h.trim_start_matches("0x"), 16).ok()).unwrap_or_default();
             let block_hash = lg.blockHash.as_deref().and_then(|h| B256::from_str(h).ok()).unwrap_or_default();
+            let block_number = if let Some(bh) = lg.blockHash.as_deref() {
+                let blk: RpcBlock = self.rpc.call("eth_getBlockByHash", json!([bh, false])).await?;
+                u64::from_str_radix(blk.number.trim_start_matches("0x"), 16).unwrap_or_default()
+            } else {
+                lg.blockNumber.as_deref().and_then(|h| u64::from_str_radix(h.trim_start_matches("0x"), 16).ok()).unwrap_or_default()
+            };
 
             let header = nitro_primitives::l1::L1IncomingMessageHeader {
                 kind,
