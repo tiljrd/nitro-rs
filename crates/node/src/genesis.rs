@@ -162,6 +162,8 @@ impl GenesisBootstrap {
         } else {
             from_block + 100_000
         };
+        tracing::info!(target: "genesis_bootstrap", "received deployed_at param={}", deployed_at);
+
         tracing::info!(target: "genesis_bootstrap", "init scan configured: deployed_at={} latest={}", from_block, latest);
         let fetcher = |_bn: u64| -> anyhow::Result<Vec<u8>> { Ok(Vec::new()) };
 

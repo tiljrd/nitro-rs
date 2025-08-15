@@ -189,6 +189,9 @@ impl NitroNode {
         let json_bridge_addr = Address::from_str(&rollup.bridge)?;
         let json_seq_inbox_addr = Address::from_str(&rollup.sequencer_inbox)?;
         let json_deployed_at = rollup.deployed_at.unwrap_or(0);
+        tracing::info!("chaininfo: selected={} chain_id={:?}", chain_entry.chain_name.as_deref().unwrap_or("unknown"), chain_entry.chain_id);
+        tracing::info!("chaininfo: rollup.bridge={} seq_inbox={} deployed_at={}", rollup.bridge, rollup.sequencer_inbox, json_deployed_at);
+
 
         let delayed_bridge_addr = if let Some(a) = delayed_bridge_addr_opt { a } else { json_bridge_addr };
         let sequencer_inbox_addr = if let Some(a) = sequencer_inbox_addr_opt { a } else { json_seq_inbox_addr };
@@ -256,6 +259,7 @@ impl NitroNode {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(json_deployed_at)
         };
+        tracing::info!("inbox_reader: first_message_block={}", first_msg_block);
         let _ = nitro_rpc::register_backend(tracker.clone(), streamer_impl.clone());
 
         let inbox_reader = nitro_inbox_reader::reader::InboxReader::new(
