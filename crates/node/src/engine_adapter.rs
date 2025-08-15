@@ -133,7 +133,38 @@ impl ExecEngine for RethExecEngine {
             tracing::info!("engine_adapter: seeded forkchoice with genesis={:?}", self.genesis_hash);
         }
 
-        let attrs = EthPayloadBuilderAttributes::new(parent_hash, rpc_attrs);
+        let pre_fcu = ForkchoiceState {
+            head_block_hash: parent_hash,
+            safe_block_hash: parent_hash,
+            finalized_block_hash: parent_hash,
+        };
+        let pre_resp = beacon
+            .fork_choice_updated(pre_fcu, None, EngineApiMessageVersion::default())
+            .await
+            .map_err(|e| anyhow!("engine pre fork_choice_updated error: {e}"))?;
+        tracing::info!("engine_adapter: pre-forkchoiceUpdated payload_status={:?}", pre_resp.payload_status);
+        if pre_resp.is_invalid() {
+            return Err(anyhow!("engine pre fork_choice_updated invalid: {:?}", pre_resp.payload_status));
+        }
+
+        let fcu_with_attrs = beacon
+            .fork_choice_updated(
+                ForkchoiceState {
+                    head_block_hash: parent_hash,
+                    safe_block_hash: parent_hash,
+                    finalized_block_hash: parent_hash,
+                },
+                Some(rpc_attrs.clone()),
+                EngineApiMessageVersion::default(),
+            )
+            .await
+            .map_err(|e| anyhow!("engine fork_choice_updated(with attrs) error: {e}"))?;
+        tracing::info!("engine_adapter: forkchoiceUpdated(with attrs) payload_status={:?}", fcu_with_attrs.payload_status);
+        if fcu_with_attrs.is_invalid() {
+            return Err(anyhow!("engine fork_choice_updated with attrs invalid: {:?}", fcu_with_attrs.payload_status));
+        }
+
+        let attrs = EthPayloadBuilderAttributes::new(parent_hash, rpc_attrs.clone());
         let id = {
             let mut attempts = 0usize;
             loop {
@@ -167,19 +198,6 @@ impl ExecEngine for RethExecEngine {
             .await
             .ok_or_else(|| anyhow!("payload resolve channel closed"))??;
 
-        let sealed = built.clone().into_sealed_block();
-        let exec_data =
-            <ArbPayloadTypes as reth_payload_primitives::PayloadTypes>::block_to_payload(sealed);
-
-        let status = beacon
-            .new_payload(exec_data)
-            .await
-            .map_err(|e| anyhow!("engine new_payload error: {e}"))?;
-        tracing::info!("engine_adapter: new_payload status={:?}", status);
-        if !matches!(status.status, PayloadStatusEnum::Valid) {
-            return Err(anyhow!("engine new_payload not valid: {:?}", status));
-        }
-
         let block_hash = built.block().hash();
         let header = built.block().header();
         let send_root = {
@@ -192,8 +210,8 @@ impl ExecEngine for RethExecEngine {
         };
         let fcu_state = ForkchoiceState {
             head_block_hash: block_hash,
-            safe_block_hash: block_hash,
-            finalized_block_hash: block_hash,
+            safe_block_hash: parent_hash,
+            finalized_block_hash: parent_hash,
         };
         let fcu_resp = beacon
             .fork_choice_updated(fcu_state, None, EngineApiMessageVersion::default())
