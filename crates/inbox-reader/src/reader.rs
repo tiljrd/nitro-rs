@@ -294,7 +294,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                         let (bytes, block_hash) = {
                             let (data, blk_hash, _seen) = self
                                 .sequencer_inbox
-                                .get_sequencer_message_bytes_in_block(b.parent_chain_block_number, b.sequence_number)
+                                .get_sequencer_message_bytes_in_block(b.parent_chain_block_number, b.sequence_number, b.block_hash)
                                 .await?;
                             (data, blk_hash)
                         };
@@ -372,7 +372,7 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
         let block_num = metadata.parent_chain_block;
         let (data, block_hash, _seen) = self
             .sequencer_inbox
-            .get_sequencer_message_bytes_in_block(block_num, seq_num)
+            .get_sequencer_message_bytes_in_block(block_num, seq_num, alloy_primitives::B256::ZERO)
             .await?;
         Ok((data, block_hash))
     }

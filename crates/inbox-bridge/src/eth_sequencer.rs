@@ -189,17 +189,26 @@ impl SequencerInbox for EthSequencerInbox {
         &self,
         block_number: u64,
         seq_num: u64,
+        block_hash: B256,
     ) -> anyhow::Result<(Vec<u8>, B256, Vec<u64>)> {
         let topic0: B256 = keccak256(EVT_SEQUENCER_BATCH_DATA.as_bytes());
         let mut topic1_bytes = [0u8; 32];
         topic1_bytes[24..32].copy_from_slice(&seq_num.to_be_bytes());
         let topic1 = B256::from_slice(&topic1_bytes);
-        let filter = json!({
-            "fromBlock": format!("0x{:x}", block_number),
-            "toBlock": format!("0x{:x}", block_number),
-            "address": format!("{:#x}", self.inbox_addr),
-            "topics": [[format!("{:#x}", topic0)], [format!("{:#x}", topic1)]],
-        });
+        let filter = if block_hash != B256::ZERO {
+            json!({
+                "blockHash": format!("{:#x}", block_hash),
+                "address": format!("{:#x}", self.inbox_addr),
+                "topics": [[format!("{:#x}", topic0)], [format!("{:#x}", topic1)]],
+            })
+        } else {
+            json!({
+                "fromBlock": format!("0x{:x}", block_number),
+                "toBlock": format!("0x{:x}", block_number),
+                "address": format!("{:#x}", self.inbox_addr),
+                "topics": [[format!("{:#x}", topic0)], [format!("{:#x}", topic1)]],
+            })
+        };
         let logs: Vec<RpcLog> = self.rpc.call("eth_getLogs", json!([filter])).await?;
         if logs.len() != 1 {
             anyhow::bail!("expected exactly 1 SequencerBatchData log for seq {} at block {}", seq_num, block_number);

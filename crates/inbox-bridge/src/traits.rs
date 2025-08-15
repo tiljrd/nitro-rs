@@ -26,6 +26,7 @@ pub trait SequencerInbox: Send + Sync {
         &self,
         block_number: u64,
         seq_num: u64,
+        block_hash: B256,
     ) -> anyhow::Result<(Vec<u8>, B256, Vec<u64>)>;
 }
 
