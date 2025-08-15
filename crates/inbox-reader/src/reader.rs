@@ -341,11 +341,19 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                                     let mut found: Option<Vec<u8>> = None;
                                     for i in 0..words {
                                         let off_be = &params[i * 32..(i + 1) * 32];
-                                        let off = alloy_primitives::U256::from_be_bytes(<[u8; 32]>::try_from(off_be).unwrap()).to::<usize>();
+                                        let off_u256 = alloy_primitives::U256::from_be_bytes(<[u8; 32]>::try_from(off_be).unwrap());
+                                        let off: usize = match off_u256.try_into() {
+                                            Ok(v) => v,
+                                            Err(_) => { continue; }
+                                        };
                                         if off + 32 <= params.len() {
                                             let mut len_bytes = [0u8; 32];
                                             len_bytes.copy_from_slice(&params[off..off + 32]);
-                                            let len = alloy_primitives::U256::from_be_bytes(len_bytes).to::<usize>();
+                                            let len_u256 = alloy_primitives::U256::from_be_bytes(len_bytes);
+                                            let len: usize = match len_u256.try_into() {
+                                                Ok(v) => v,
+                                                Err(_) => { continue; }
+                                            };
                                             if off + 32 + len <= params.len() {
                                                 let bytes = params[off + 32..off + 32 + len].to_vec();
                                                 found = Some(bytes);
