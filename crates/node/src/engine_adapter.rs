@@ -62,20 +62,22 @@ impl ExecEngine for RethExecEngine {
         let mut slice = data.as_slice();
         let count = <u64 as alloy_rlp::Decodable>::decode(&mut slice)
             .map_err(|e| anyhow!("failed to decode message count: {e}"))?;
+        tracing::info!("engine_adapter: head_message_index message_count={}", count);
         if count == 0 {
             return Ok(u64::MAX);
         }
         let mut i = count - 1;
         loop {
             let key = db_key(MESSAGE_RESULT_PREFIX, i);
-            match self.db.has(&key)? {
-                true => return Ok(i),
-                false => {
-                    if i == 0 {
-                        break;
-                    }
-                    i -= 1;
+            let has = self.db.has(&key)?;
+            tracing::info!("engine_adapter: head_message_index check idx={} has={}", i, has);
+            if has {
+                return Ok(i);
+            } else {
+                if i == 0 {
+                    break;
                 }
+                i -= 1;
             }
         }
         Ok(u64::MAX)
@@ -139,19 +141,19 @@ impl ExecEngine for RethExecEngine {
                     Ok(Ok(id)) => break id,
                     Ok(Err(e)) => {
                         let msg = format!("{e}");
-                        if msg.contains("missing parent header") && attempts < 20 {
+                        if msg.contains("missing parent header") && attempts < 60 {
                             attempts += 1;
-                            tracing::warn!("payload_builder: parent header not yet available, retry {attempts}/20");
-                            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                            tracing::warn!("payload_builder: parent header not yet available, parent={:?}, retry {attempts}/60", parent_hash);
+                            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                             continue;
                         }
                         return Err(anyhow!("failed to get payload id: {e}"));
                     }
                     Err(_) => {
-                        if attempts < 5 {
+                        if attempts < 10 {
                             attempts += 1;
-                            tracing::warn!("payload_builder: channel closed? retrying {attempts}/5");
-                            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                            tracing::warn!("payload_builder: channel closed? retrying {attempts}/10");
+                            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                             continue;
                         }
                         return Err(anyhow!("failed to get payload id: channel closed"));

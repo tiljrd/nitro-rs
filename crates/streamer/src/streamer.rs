@@ -288,11 +288,17 @@ impl<D: Database> TransactionStreamer<D> {
     }
     pub async fn execute_next_msg(&self) -> Result<bool> {
         let consensus_head = self.get_head_message_index()?;
+        tracing::info!("streamer: consensus_head={:?}", consensus_head);
         if consensus_head == u64::MAX {
             return Ok(false);
         }
+
         let exec_head = self.exec.head_message_index().await?;
+        tracing::info!("streamer: exec_head={:?}", exec_head);
+
         let msg_idx = if exec_head == u64::MAX { 0 } else { exec_head + 1 };
+        tracing::info!("streamer: next msg_idx to execute={:?}", msg_idx);
+
         if msg_idx > consensus_head {
             return Ok(false);
         }
@@ -320,6 +326,7 @@ impl<D: Database> TransactionStreamer<D> {
         Ok(count)
     }
     fn store_result(&self, msg_idx: u64, res: &MessageResult, batch: &mut dyn Batch) -> Result<()> {
+        tracing::info!("streamer: store_result idx={} block_hash={:?}", msg_idx, res.block_hash);
         let bytes = alloy_rlp::encode(res);
         let key = db_key(MESSAGE_RESULT_PREFIX, msg_idx);
         batch.put(&key, &bytes)?;
