@@ -18,7 +18,7 @@ use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_payload_primitives::PayloadKind;
 use reth_payload_primitives::EngineApiMessageVersion;
-use reth_engine_primitives::{PayloadStatusEnum, PayloadStatus};
+use alloy_rpc_types_engine::PayloadStatusEnum;
 
 
 type PayloadTy = ArbEngineTypes<ArbPayloadTypes>;
