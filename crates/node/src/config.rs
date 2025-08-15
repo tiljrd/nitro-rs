@@ -2,6 +2,17 @@ use clap::Parser;
 
 #[derive(Debug, Clone, Parser)]
 pub struct NodeArgs {
+    #[arg(long = "l1-rpc-url", env = "NITRO_L1_RPC")]
+    pub l1_rpc_url: Option<String>,
+
+    #[arg(long = "sequencer-inbox", env = "NITRO_SEQUENCER_INBOX")]
+    pub sequencer_inbox: Option<String>,
+
+    #[arg(long = "delayed-bridge", env = "NITRO_DELAYED_BRIDGE")]
+    pub delayed_bridge: Option<String>,
+
+    #[arg(long = "first-message-block", env = "NITRO_FIRST_MESSAGE_BLOCK")]
+    pub first_message_block: Option<u64>,
     #[arg(long, env = "NITRO_NETWORK")]
     pub network: Option<String>,
 

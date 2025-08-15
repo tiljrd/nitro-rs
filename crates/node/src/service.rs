@@ -72,9 +72,21 @@ impl NitroNode {
         let db_path = std::env::var("NITRO_DB_PATH").unwrap_or_else(|_| "./nitro-db".to_string());
         let db = Arc::new(nitro_db_sled::SledDb::open(&db_path)?);
 
-        let mut l1_rpc = std::env::var("NITRO_L1_RPC").unwrap_or_else(|_| "http://localhost:8545".to_string());
-        let mut delayed_bridge_addr_opt: Option<Address> = None;
-        let mut sequencer_inbox_addr_opt: Option<Address> = None;
+        let mut l1_rpc = if let Some(v) = self.args.l1_rpc_url.clone() {
+            v
+        } else {
+            std::env::var("NITRO_L1_RPC").unwrap_or_else(|_| "http://localhost:8545".to_string())
+        };
+        let mut delayed_bridge_addr_opt: Option<Address> = self
+            .args
+            .delayed_bridge
+            .as_deref()
+            .and_then(|s| Address::from_str(s).ok());
+        let mut sequencer_inbox_addr_opt: Option<Address> = self
+            .args
+            .sequencer_inbox
+            .as_deref()
+            .and_then(|s| Address::from_str(s).ok());
         let mut poster_enable_cfg = self.args.poster_enable;
         let mut parent_chain_bound_cfg: Option<String> = None;
         let mut poster_privkey_cfg: Option<String> = std::env::var("NITRO_L1_POSTER_KEY").ok();
@@ -209,10 +221,14 @@ impl NitroNode {
         let tracker = Arc::new(nitro_inbox::tracker::InboxTracker::new(db.clone(), streamer_trait.clone()));
         tracker.initialize()?;
 
-        let first_msg_block: u64 = std::env::var("NITRO_FIRST_MESSAGE_BLOCK")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
+        let first_msg_block: u64 = if let Some(v) = self.args.first_message_block {
+            v
+        } else {
+            std::env::var("NITRO_FIRST_MESSAGE_BLOCK")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0)
+        };
         let _ = nitro_rpc::register_backend(tracker.clone(), streamer_impl.clone());
 
         let inbox_reader = nitro_inbox_reader::reader::InboxReader::new(
