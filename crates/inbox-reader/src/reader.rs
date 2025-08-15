@@ -110,17 +110,27 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                     tokio::select! {
                         v = headers_rx.recv() => {
                             if v.is_none() {
-                                break;
-                            }
-                            let block_num2 = if read_mode == "safe" {
-                                self.l1_reader.latest_safe_block_nr().await?
+                                info!("inbox_reader: header subscription closed; continuing in polling mode (non-latest)");
+                                let block_num2 = if read_mode == "safe" {
+                                    self.l1_reader.latest_safe_block_nr().await?
+                                } else {
+                                    self.l1_reader.latest_finalized_block_nr().await?
+                                };
+                                if block_num2 == 0 {
+                                    return Err(anyhow::anyhow!("unable to fetch latest {} block", read_mode));
+                                }
+                                current_height = block_num2;
                             } else {
-                                self.l1_reader.latest_finalized_block_nr().await?
-                            };
-                            if block_num2 == 0 {
-                                return Err(anyhow::anyhow!("unable to fetch latest {} block", read_mode));
+                                let block_num2 = if read_mode == "safe" {
+                                    self.l1_reader.latest_safe_block_nr().await?
+                                } else {
+                                    self.l1_reader.latest_finalized_block_nr().await?
+                                };
+                                if block_num2 == 0 {
+                                    return Err(anyhow::anyhow!("unable to fetch latest {} block", read_mode));
+                                }
+                                current_height = block_num2;
                             }
-                            current_height = block_num2;
                         }
                     }
                 }
@@ -139,14 +149,16 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                     tokio::select! {
                         v = headers_rx.recv() => {
                             if v.is_none() {
-                                break;
-                            }
-                            if let Some(h) = v {
+                                info!("inbox_reader: header subscription closed; continuing in polling mode (latest)");
+                                let latest2 = self.l1_reader.last_header().await?;
+                                current_height = latest2.number;
+                            } else if let Some(h) = v {
                                 current_height = h.number;
                             }
                         }
                         _ = delay.tick() => {
-                            break;
+                            let latest2 = self.l1_reader.last_header().await?;
+                            current_height = latest2.number;
                         }
                     }
                 }
