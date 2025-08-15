@@ -18,6 +18,7 @@ use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_payload_primitives::PayloadKind;
 use reth_payload_primitives::EngineApiMessageVersion;
+use reth_engine_primitives::{PayloadStatusEnum, PayloadStatus};
 
 
 type PayloadTy = ArbEngineTypes<ArbPayloadTypes>;
@@ -173,6 +174,9 @@ impl ExecEngine for RethExecEngine {
             .await
             .map_err(|e| anyhow!("engine new_payload error: {e}"))?;
         tracing::info!("engine_adapter: new_payload status={:?}", status);
+        if !matches!(status.status, PayloadStatusEnum::Valid) {
+            return Err(anyhow!("engine new_payload not valid: {:?}", status));
+        }
 
         let block_hash = built.block().hash();
         let header = built.block().header();
@@ -194,6 +198,9 @@ impl ExecEngine for RethExecEngine {
             .await
             .map_err(|e| anyhow!("engine fork_choice_updated error: {e}"))?;
         tracing::info!("engine_adapter: forkchoiceUpdated payload_status={:?}", fcu_resp.payload_status);
+        if !matches!(fcu_resp.payload_status.status, PayloadStatusEnum::Valid) {
+            return Err(anyhow!("engine fork_choice_updated not valid: {:?}", fcu_resp.payload_status));
+        }
         Ok(MessageResult { block_hash, send_root })
     }
     async fn result_at_message_index(&self, msg_idx: u64) -> Result<MessageResult> {
