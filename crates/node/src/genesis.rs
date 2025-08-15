@@ -15,8 +15,8 @@ impl GenesisBootstrap {
         HR: inbox_bridge::traits::L1HeaderReader + Send + Sync + ?Sized,
     {
         let from_block = deployed_at;
-        let to_block =
-            header_reader.latest_finalized_block_nr().await.unwrap_or(from_block + 10_000);
+        let latest = header_reader.latest_finalized_block_nr().await.unwrap_or(from_block + 10_000);
+        let to_block = std::cmp::min(latest, from_block.saturating_add(9_999));
         let fetcher = |_bn: u64| -> anyhow::Result<Vec<u8>> { Ok(Vec::new()) };
         let msgs =
             delayed_bridge.lookup_messages_in_range(from_block, to_block, fetcher).await?;
