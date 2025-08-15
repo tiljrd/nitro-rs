@@ -52,6 +52,10 @@ pub struct NodeArgs {
 
     #[arg(long, env = "NITRO_VALIDATOR_ENABLE", default_value_t = false)]
     pub validator_enable: bool,
+
+    #[arg(long = "db-path", env = "NITRO_DB_PATH", default_value = "./nitro-db")]
+    pub db_path: String,
+
     #[arg(long = "beacon-url", env = "NITRO_BEACON_URL")]
     pub beacon_url: Option<String>,
 

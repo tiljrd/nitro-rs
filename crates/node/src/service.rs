@@ -69,7 +69,7 @@ impl NitroNode {
     pub async fn start(self) -> Result<()> {
         info!("starting nitro-rs node; args: {:?}", self.args);
 
-        let db_path = std::env::var("NITRO_DB_PATH").unwrap_or_else(|_| "./nitro-db".to_string());
+        let db_path = self.args.db_path.clone();
         let db = Arc::new(nitro_db_sled::SledDb::open(&db_path)?);
 
         let mut l1_rpc = if let Some(v) = self.args.l1_rpc_url.clone() {
