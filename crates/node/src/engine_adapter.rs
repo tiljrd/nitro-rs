@@ -117,6 +117,19 @@ impl ExecEngine for RethExecEngine {
             parent_beacon_block_root: None,
         };
 
+        if msg_idx == 0 {
+            let fc = ForkchoiceState {
+                head_block_hash: self.genesis_hash,
+                safe_block_hash: self.genesis_hash,
+                finalized_block_hash: self.genesis_hash,
+            };
+            let _ = beacon
+                .fork_choice_updated(fc, None, EngineApiMessageVersion::default())
+                .await
+                .map_err(|e| anyhow!("engine initial fork_choice_updated error: {e}"))?;
+            tracing::info!("engine_adapter: seeded forkchoice with genesis={:?}", self.genesis_hash);
+        }
+
         let attrs = EthPayloadBuilderAttributes::new(parent_hash, rpc_attrs);
         let id = {
             let mut attempts = 0usize;
