@@ -235,9 +235,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.18.1"
+version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "145913bf9bc11a7cec63a61aba36a39e41f2604aceb6d81b6bb8a4b2ddc93423"
+checksum = "ff4d88e267e4b599e944e1d32fbbfeaf4b8ea414e54da27306ede37c0798684d"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6074,9 +6074,12 @@ name = "reth-arbitrum-node"
 version = "1.6.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
+ "arb-alloy-consensus 0.1.2",
  "clap",
  "eyre",
  "reth-arbitrum-chainspec",
@@ -6088,10 +6091,12 @@ dependencies = [
  "reth-arbitrum-txpool",
  "reth-chainspec",
  "reth-consensus",
+ "reth-consensus-common",
  "reth-engine-local",
  "reth-engine-primitives",
  "reth-ethereum-consensus",
  "reth-evm",
+ "reth-execution-types",
  "reth-network",
  "reth-node-api",
  "reth-node-builder",
@@ -6100,6 +6105,7 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-revm",
  "reth-rpc-api",
  "reth-rpc-engine-api",
  "reth-rpc-server-types",
@@ -7421,6 +7427,7 @@ dependencies = [
  "reth-node-events",
  "reth-node-metrics",
  "reth-payload-builder",
+ "reth-payload-builder-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune",

@@ -108,6 +108,8 @@ impl ExecEngine for RethExecEngine {
 
         let parent_hash = if msg_idx == 0 {
             self.genesis_hash
+        } else if msg_idx == 1 {
+            self.genesis_hash
         } else {
             let prev_key = db_key(MESSAGE_RESULT_PREFIX, msg_idx - 1);
             let prev = {
