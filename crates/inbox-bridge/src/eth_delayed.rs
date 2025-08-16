@@ -6,7 +6,6 @@ use alloy_primitives::{keccak256, Address, B256, U256};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
-use crate::util::safe_from_for_proxy;
 use std::collections::{BTreeSet, HashMap};
 use std::str::FromStr;
 use std::sync::Arc;

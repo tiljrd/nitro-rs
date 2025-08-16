@@ -1,7 +1,7 @@
 use alloy_primitives::{keccak256, B256};
 
 use crate::selectors::{
-    EVT_SEQUENCER_BATCH_DATA, EVT_SEQUENCER_BATCH_DELIVERED, SIG_DELAYED_COUNT,
+    EVT_SEQ_BATCH_DATA, EVT_SEQ_BATCH_DELIVERED, SIG_DELAYED_COUNT,
     SIG_DELAYED_INBOX_ACCS, SIG_INBOX_ACCS, SIG_BATCH_COUNT, SIG_SEND_L2_FROM_ORIGIN,
 };
 
@@ -27,11 +27,11 @@ fn test_function_selectors_match_expected() {
 #[test]
 fn test_sequencer_event_topics_are_stable() {
     assert_eq!(
-        topic_hex(EVT_SEQUENCER_BATCH_DELIVERED),
+        topic_hex(EVT_SEQ_BATCH_DELIVERED),
         "0x7394f4a19a13c7b92b5bb71033245305946ef78452f7b4986ac1390b5df4ebd7"
     );
     assert_eq!(
-        topic_hex(EVT_SEQUENCER_BATCH_DATA),
+        topic_hex(EVT_SEQ_BATCH_DATA),
         "0xff64905f73a67fb594e0f940a8075a860db489ad991e032f48c81123eb52d60b"
     );
 }

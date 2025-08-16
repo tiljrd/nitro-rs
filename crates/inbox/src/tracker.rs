@@ -409,6 +409,14 @@ impl<D: Database> InboxTracker<D> {
         }
 
         if !out.is_empty() {
+            let cur_db_count = {
+                let data = self.db.get(MESSAGE_COUNT_KEY)?;
+                let mut bytes = data.as_slice();
+                <u64 as alloy_rlp::Decodable>::decode(&mut bytes)?
+            };
+            if cur_db_count != prev_meta.message_count {
+                anyhow::bail!("non-contiguous append: db_count {} != expected {}", cur_db_count, prev_meta.message_count);
+            }
             self.tx_streamer.add_confirmed_messages_and_end_batch(prev_meta.message_count, &out, None)?;
             self.add_sequencer_batches(batches)?;
         }

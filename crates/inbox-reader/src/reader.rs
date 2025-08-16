@@ -489,7 +489,9 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                                     our_latest_batch, min_seen_seq
                                 );
                                 let cfg2 = (self.config)();
-                                from = self.get_prev_block_for_reorg(from, blocks_to_fetch).unwrap_or(self.first_message_block);
+                                let new_from = self.get_prev_block_for_reorg(from, blocks_to_fetch).unwrap_or(self.first_message_block);
+                                info!("inbox_reader: backtracking window due to non-contiguous batches: from {} -> {}, blocks_to_fetch {} -> {}", from, new_from, blocks_to_fetch, cfg2.min_blocks_to_read);
+                                from = new_from;
                                 blocks_to_fetch = cfg2.min_blocks_to_read;
                             } else {
                                 info!(
