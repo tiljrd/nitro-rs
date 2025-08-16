@@ -2,6 +2,24 @@ use clap::Parser;
 
 #[derive(Debug, Clone, Parser)]
 pub struct NodeArgs {
+    #[arg(long = "l1-rpc-url", env = "NITRO_L1_RPC")]
+    pub l1_rpc_url: Option<String>,
+
+    #[arg(long = "l2-rpc-url", env = "NITRO_L2_RPC")]
+    pub l2_rpc_url: Option<String>,
+
+    #[arg(long = "sequencer-inbox", env = "NITRO_SEQUENCER_INBOX")]
+    pub sequencer_inbox: Option<String>,
+
+    #[arg(long = "delayed-bridge", env = "NITRO_DELAYED_BRIDGE")]
+    pub delayed_bridge: Option<String>,
+
+    #[arg(long = "first-message-block", env = "NITRO_FIRST_MESSAGE_BLOCK")]
+    pub first_message_block: Option<u64>,
+
+    #[arg(long, env = "NITRO_CHAININFO_FILE")]
+    pub chaininfo_file: Option<String>,
+
     #[arg(long, env = "NITRO_NETWORK")]
     pub network: Option<String>,
 
@@ -37,4 +55,19 @@ pub struct NodeArgs {
 
     #[arg(long, env = "NITRO_VALIDATOR_ENABLE", default_value_t = false)]
     pub validator_enable: bool,
+
+    #[arg(long = "db-path", env = "NITRO_DB_PATH", default_value = "./nitro-db")]
+    pub db_path: String,
+
+    #[arg(long = "beacon-url", env = "NITRO_BEACON_URL")]
+    pub beacon_url: Option<String>,
+
+    #[arg(long = "secondary-beacon-url", env = "NITRO_BEACON_URL_SECONDARY")]
+    pub secondary_beacon_url: Option<String>,
+
+    #[arg(long = "beacon-authorization", env = "NITRO_BEACON_AUTH")]
+    pub beacon_authorization: Option<String>,
+
+    #[arg(long = "beacon-blob-directory", env = "NITRO_BEACON_BLOB_DIR")]
+    pub beacon_blob_directory: Option<String>,
 }

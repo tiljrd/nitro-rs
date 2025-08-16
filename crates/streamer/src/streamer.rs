@@ -160,8 +160,11 @@ impl<D: Database> TransactionStreamer<D> {
         if msg_idx == 0 {
             return Ok(0);
         }
-        let prev = self.get_message(msg_idx - 1)?;
-        Ok(prev.delayed_messages_read)
+        match self.get_message(msg_idx - 1) {
+            Ok(prev) => Ok(prev.delayed_messages_read),
+            Err(e) if e.to_string().contains("not found") => Ok(0),
+            Err(e) => Err(e),
+        }
     }
 
     fn count_duplicate_messages(
@@ -229,6 +232,14 @@ impl<D: Database> TransactionStreamer<D> {
         mut messages: Vec<MessageWithMetadataAndBlockInfo>,
         track_block_metadata_from: Option<u64>,
     ) -> Result<()> {
+        let db_count_now = self.get_message_count().unwrap_or(0);
+        if db_count_now != first_msg_idx {
+            return Err(anyhow::anyhow!(format!(
+                "non-contiguous append: db_count={} first_msg_idx={}",
+                db_count_now, first_msg_idx
+            )));
+        }
+
         let mut confirmed_reorg = false;
         let mut old_msg: Option<MessageWithMetadata> = None;
         let mut last_delayed_read: u64 = 0;
@@ -261,6 +272,20 @@ impl<D: Database> TransactionStreamer<D> {
             last_delayed_read = self.get_prev_prev_delayed_read(first_msg_idx)?;
         }
 
+        if !messages.is_empty() {
+            let db_count = self.get_message_count().unwrap_or(0);
+            if db_count < first_msg_idx && last_delayed_read == 0 {
+                let first_dm = messages[0].message_with_meta.delayed_messages_read;
+                tracing::info!(
+                    "streamer: seeding last_delayed_read due to gap: db_count={} first_msg_idx={} seed_dm_read={}",
+                    db_count,
+                    first_msg_idx,
+                    first_dm
+                );
+                last_delayed_read = first_dm;
+            }
+        }
+
         for (i, msg) in messages.iter().enumerate() {
             let msg_idx = first_msg_idx + i as u64;
             let dm_read = msg.message_with_meta.delayed_messages_read;
@@ -288,14 +313,21 @@ impl<D: Database> TransactionStreamer<D> {
     }
     pub async fn execute_next_msg(&self) -> Result<bool> {
         let consensus_head = self.get_head_message_index()?;
+        tracing::info!("streamer: consensus_head={:?}", consensus_head);
+
         let exec_head = self.exec.head_message_index().await?;
-        if exec_head >= consensus_head {
+        tracing::info!("streamer: exec_head={:?}", exec_head);
+
+        let msg_idx = if exec_head == u64::MAX { 0 } else { exec_head + 1 };
+        tracing::info!("streamer: next msg_idx to execute={:?}", msg_idx);
+
+        let message_count = self.get_message_count().unwrap_or(0);
+        if msg_idx >= message_count {
             return Ok(false);
         }
-        let msg_idx = exec_head + 1;
         let msg_and_block = self.get_message_with_metadata_and_block_info(msg_idx)?;
         let mut msg_for_prefetch: Option<MessageWithMetadata> = None;
-        if msg_idx + 1 <= consensus_head {
+        if msg_idx + 1 < message_count {
             msg_for_prefetch = Some(self.get_message(msg_idx + 1)?);
         }
         let res = self.exec.digest_message(
@@ -317,6 +349,7 @@ impl<D: Database> TransactionStreamer<D> {
         Ok(count)
     }
     fn store_result(&self, msg_idx: u64, res: &MessageResult, batch: &mut dyn Batch) -> Result<()> {
+        tracing::info!("streamer: store_result idx={} block_hash={:?}", msg_idx, res.block_hash);
         let bytes = alloy_rlp::encode(res);
         let key = db_key(MESSAGE_RESULT_PREFIX, msg_idx);
         batch.put(&key, &bytes)?;
@@ -409,7 +442,7 @@ impl<D: Database> TransactionStreamer<D> {
     pub fn get_head_message_index(&self) -> Result<u64> {
         let count = self.message_count()?;
         if count == 0 {
-            Ok(0)
+            Ok(u64::MAX)
         } else {
             Ok(count - 1)
         }

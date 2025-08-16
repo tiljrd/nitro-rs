@@ -4,6 +4,74 @@ use anyhow::anyhow;
 use std::io::{Cursor, Read};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParsedInitMessage {
+    pub chain_id: U256,
+    pub initial_l1_base_fee: U256,
+    pub chain_config_json: Option<Vec<u8>>,
+}
+
+impl ParsedInitMessage {
+    pub fn chain_id_u64(&self) -> Option<u64> {
+        if self.chain_id > U256::from(u64::MAX) {
+            None
+        } else {
+            Some(self.chain_id.to::<u64>())
+        }
+    }
+}
+
+pub fn parse_init_message(msg: &L1IncomingMessage) -> anyhow::Result<ParsedInitMessage> {
+    const L1_MESSAGE_TYPE_INITIALIZE: u8 = 11;
+    if msg.header.kind != L1_MESSAGE_TYPE_INITIALIZE {
+        return Err(anyhow!("invalid init message kind {}", msg.header.kind));
+    }
+    let default_basefee = U256::from(100_000_000u64); // 0.1 gwei
+    let data = &msg.l2msg;
+    if data.len() == 32 {
+        let chain_id = U256::from_be_slice(&data[0..32]);
+        return Ok(ParsedInitMessage {
+            chain_id,
+            initial_l1_base_fee: default_basefee,
+            chain_config_json: None,
+        });
+    }
+    if data.len() > 32 {
+        let chain_id = U256::from_be_slice(&data[0..32]);
+        let version = data[32];
+        if version == 1 {
+            if data.len() < 33 + 32 {
+                return Err(anyhow!("init message v1 too short for basefee"));
+            }
+            let basefee = U256::from_be_slice(&data[33..65]);
+            let cfg = if data.len() > 65 {
+                Some(data[65..].to_vec())
+            } else {
+                None
+            };
+            return Ok(ParsedInitMessage {
+                chain_id,
+                initial_l1_base_fee: basefee,
+                chain_config_json: cfg,
+            });
+        } else if version == 0 {
+            let cfg = if data.len() > 33 {
+                Some(data[33..].to_vec())
+            } else {
+                None
+            };
+            return Ok(ParsedInitMessage {
+                chain_id,
+                initial_l1_base_fee: default_basefee,
+                chain_config_json: cfg,
+            });
+        } else {
+            return Err(anyhow!("unknown init message version {}", version));
+        }
+    }
+    Err(anyhow!("invalid init message payload"))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct L1IncomingMessageHeader {
     pub kind: u8,
     pub poster: Address,
@@ -137,6 +205,35 @@ impl Decodable for L1IncomingMessage {
         Ok(Self { header, l2msg, batch_gas_cost })
     }
 }
+use alloy_primitives::keccak256;
+
+fn u64_be_8(n: u64) -> [u8; 8] {
+    n.to_be_bytes()
+}
+
+pub fn delayed_message_body_hash(msg: &L1IncomingMessage) -> B256 {
+    let mut buf: Vec<u8> = Vec::new();
+    buf.push(msg.header.kind);
+    buf.extend_from_slice(msg.header.poster.as_slice());
+    buf.extend_from_slice(&u64_be_8(msg.header.block_number));
+    buf.extend_from_slice(&u64_be_8(msg.header.timestamp));
+    if let Some(req) = msg.header.request_id {
+        buf.extend_from_slice(req.as_slice());
+    }
+    let mut base_fee_be = msg.header.l1_base_fee.to_be_bytes_vec();
+    if base_fee_be.len() < 32 {
+        let mut padded = vec![0u8; 32 - base_fee_be.len()];
+        padded.extend_from_slice(&base_fee_be);
+        base_fee_be = padded;
+    } else if base_fee_be.len() > 32 {
+        base_fee_be = base_fee_be[base_fee_be.len() - 32..].to_vec();
+    }
+    buf.extend_from_slice(&base_fee_be);
+    let l2_hash = keccak256(&msg.l2msg);
+    buf.extend_from_slice(l2_hash.as_slice());
+    B256::from(keccak256(&buf))
+}
+
 
 
 fn read_exact<const N: usize>(r: &mut Cursor<&[u8]>) -> anyhow::Result<[u8; N]> {

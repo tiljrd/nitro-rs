@@ -40,6 +40,7 @@ alloy-primitives = { workspace = true }
 alloy-rlp = { workspace = true }
 
 # Nitro-rs crates
+alloy-genesis = { workspace = true }
 nitro-inbox = { path = "../inbox" }
 nitro-inbox-reader = { path = "../inbox-reader" }
 nitro-streamer = { path = "../streamer" }
@@ -49,3 +50,5 @@ nitro-rpc = { path = "../rpc" }
 nitro-primitives = { path = "../primitives" }
 nitro-db-sled = { path = "../db-sled" }
 inbox-bridge = { path = "../inbox-bridge" }
+alloy-rpc-types-engine = "1.0.24"
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }

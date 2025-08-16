@@ -1,11 +1,11 @@
 use crate::db::Database;
-use crate::multiplexer::{InboxMultiplexer, InboxBackend};
+use crate::multiplexer::{InboxMultiplexer, InboxBackend, parse_sequencer_message};
 use crate::streamer::Streamer;
 use alloy_primitives::B256;
 use alloy_rlp::Decodable;
 use nitro_primitives::dbkeys::*;
 use nitro_primitives::accumulator::hash_after;
-use nitro_primitives::l1::{L1IncomingMessage, parse_incoming_l1_message_legacy, serialize_incoming_l1_message_legacy};
+use nitro_primitives::l1::{L1IncomingMessage, parse_incoming_l1_message_legacy, serialize_incoming_l1_message_legacy, delayed_message_body_hash};
 use nitro_primitives::message::MessageWithMetadataAndBlockInfo;
 use inbox_bridge::types::SequencerInboxBatch;
 use std::sync::{Arc, Mutex};
@@ -67,8 +67,9 @@ impl<D: Database> InboxTracker<D> {
                 anyhow::bail!("delayed message entry missing accumulator");
             }
             let prev = B256::from_slice(&data[..32]);
-            let msg_bytes = &data[32..];
-            return Ok(hash_after(prev, msg_bytes));
+            let msg = parse_incoming_l1_message_legacy(&data[32..])?;
+            let body_hash = delayed_message_body_hash(&msg);
+            return Ok(hash_after(prev, body_hash.as_slice()));
         }
         let legacy_key = db_key(LEGACY_DELAYED_MESSAGE_PREFIX, seqnum);
         if self.db.has(&legacy_key)? {
@@ -78,8 +79,8 @@ impl<D: Database> InboxTracker<D> {
             }
             let prev = B256::from_slice(&data[..32]);
             let msg = parse_incoming_l1_message_legacy(&data[32..])?;
-            let ser = serialize_incoming_l1_message_legacy(&msg)?;
-            return Ok(hash_after(prev, &ser));
+            let body_hash = delayed_message_body_hash(&msg);
+            return Ok(hash_after(prev, body_hash.as_slice()));
         }
         anyhow::bail!("accumulator not found: delayed {}", seqnum)
     }
@@ -129,7 +130,27 @@ impl<D: Database> InboxTracker<D> {
     pub fn get_batch_count(&self) -> anyhow::Result<u64> {
         let data = self.db.get(SEQUENCER_BATCH_COUNT_KEY)?;
         let mut bytes = &data[..];
-        Ok(u64::decode(&mut bytes)?)
+        let mut count: u64 = u64::decode(&mut bytes)?;
+        if count == 0 {
+            return Ok(0);
+        }
+        let mut repaired = false;
+        while count > 0 {
+            let key_prev = db_key(SEQUENCER_BATCH_META_PREFIX, count - 1);
+            if self.db.has(&key_prev)? {
+                break;
+            }
+            count -= 1;
+            repaired = true;
+        }
+        if repaired {
+            let mut batch = self.db.new_batch();
+            let enc = alloy_rlp::encode(&count);
+            batch.put(SEQUENCER_BATCH_COUNT_KEY, &enc)?;
+            batch.write()?;
+            tracing::info!("inbox_tracker: repaired batch_count to {}", count);
+        }
+        Ok(count)
     }
     pub fn reorg_delayed_to(&self, new_delayed_count: u64) -> anyhow::Result<()> {
         let mut batch = self.db.new_batch();
@@ -147,6 +168,7 @@ impl<D: Database> InboxTracker<D> {
         if batches.is_empty() {
             return Ok(());
         }
+
         let mut next_acc = B256::ZERO;
         let mut prev_meta = BatchMetadata {
             accumulator: B256::ZERO,
@@ -154,39 +176,119 @@ impl<D: Database> InboxTracker<D> {
             delayed_message_count: 0,
             parent_chain_block: 0,
         };
+
         let mut pos = batches[0].sequence_number;
+        tracing::info!(
+            "inbox_tracker: add_sequencer_batches start batches.len={} first_seq={}",
+            batches.len(),
+            pos
+        );
+
         if pos > 0 {
-            prev_meta = self.get_batch_metadata(pos - 1)?;
-            next_acc = prev_meta.accumulator;
+            match self.get_batch_metadata(pos - 1) {
+                Ok(m) => {
+                    tracing::info!(
+                        "inbox_tracker: found prev batch meta seq={} acc={:?} msg_count={} delayed_count={}",
+                        pos - 1,
+                        m.accumulator,
+                        m.message_count,
+                        m.delayed_message_count
+                    );
+                    prev_meta = m;
+                    next_acc = prev_meta.accumulator;
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "inbox_tracker: missing prev batch metadata for seq={} error={}",
+                        pos - 1,
+                        e
+                    );
+                    return Err(e);
+                }
+            }
+        } else {
+            tracing::info!("inbox_tracker: starting from batch 0");
         }
+
         let mut db_batch = self.db.new_batch();
+        tracing::info!(
+            "inbox_tracker: delete DELAYED_SEQUENCED from delayed_count+1={} (prev_meta.delayed_message_count={})",
+            prev_meta.delayed_message_count + 1,
+            prev_meta.delayed_message_count
+        );
         crate::util::delete_starting_at(
             self.db.as_ref(),
             db_batch.as_mut(),
             DELAYED_SEQUENCED_PREFIX,
             &uint64_to_key(prev_meta.delayed_message_count + 1),
         )?;
+
         for b in batches {
+            tracing::info!(
+                "inbox_tracker: checking batch seq={} expected_pos={} before_inbox_acc={:?} next_acc_expected={:?} after_delayed_count={}",
+                b.sequence_number,
+                pos,
+                b.before_inbox_acc,
+                next_acc,
+                b.after_delayed_count
+            );
             if b.sequence_number != pos {
+                tracing::error!(
+                    "inbox_tracker: unexpected batch sequence number {} expected {}",
+                    b.sequence_number,
+                    pos
+                );
                 anyhow::bail!("unexpected batch sequence number {} expected {}", b.sequence_number, pos);
             }
             if next_acc != b.before_inbox_acc {
+                tracing::error!(
+                    "inbox_tracker: previous batch accumulator mismatch: have_next_acc={:?} batch.before_inbox_acc={:?} seq={}",
+                    next_acc,
+                    b.before_inbox_acc,
+                    b.sequence_number
+                );
                 anyhow::bail!("previous batch accumulator mismatch");
             }
             if b.after_delayed_count > 0 {
                 let have_delayed = self.get_delayed_acc(b.after_delayed_count - 1).ok();
                 if have_delayed != Some(b.after_delayed_acc) {
+                    tracing::error!(
+                        "inbox_tracker: delayed accumulator mismatch at delayed_idx={} have={:?} expected={:?} batch_seq={}",
+                        b.after_delayed_count - 1,
+                        have_delayed,
+                        b.after_delayed_acc,
+                        b.sequence_number
+                    );
                     anyhow::bail!("delayed message accumulator doesn't match sequencer batch");
+                } else {
+                    tracing::info!(
+                        "inbox_tracker: delayed accumulator ok at delayed_idx={} acc={:?}",
+                        b.after_delayed_count - 1,
+                        b.after_delayed_acc
+                    );
                 }
             }
             next_acc = b.after_inbox_acc;
+            tracing::info!(
+                "inbox_tracker: batch ok seq={} new_next_acc={:?}",
+                b.sequence_number,
+                next_acc
+            );
             pos += 1;
         }
 
         let mut last_meta = prev_meta.clone();
         let mut to_cache: Vec<(u64, BatchMetadata)> = Vec::with_capacity(batches.len());
         for b in batches {
-            let msg_count_for_batch = last_meta.message_count + 1;
+            let seq_msg = parse_sequencer_message(b.sequence_number, Some(b.block_hash), &b.serialized)?;
+            let l2_count: u64 = seq_msg
+                .segments
+                .iter()
+                .filter(|seg| !seg.is_empty() && (seg[0] == 0 || seg[0] == 1))
+                .count() as u64;
+            let delayed_inc = b.after_delayed_count.saturating_sub(last_meta.delayed_message_count);
+            let msg_count_for_batch = last_meta.message_count + l2_count + delayed_inc;
+
             let meta = BatchMetadata {
                 accumulator: b.after_inbox_acc,
                 message_count: msg_count_for_batch,
@@ -211,9 +313,11 @@ impl<D: Database> InboxTracker<D> {
             last_meta = meta;
         }
 
+        tracing::info!("inbox_tracker: delete_batch_metadata_starting_at from pos={}", pos);
         self.delete_batch_metadata_starting_at(pos)?;
         let enc = alloy_rlp::encode(&pos);
         db_batch.put(SEQUENCER_BATCH_COUNT_KEY, &enc)?;
+        tracing::info!("inbox_tracker: wrote SEQUENCER_BATCH_COUNT_KEY new_count={}", pos);
         db_batch.write()?;
 
         let mut cache = self.batch_meta_cache.lock().unwrap();
@@ -230,15 +334,72 @@ impl<D: Database> InboxTracker<D> {
 
     pub fn add_sequencer_batches_and_stream(&self, batches: &[SequencerInboxBatch]) -> anyhow::Result<()> {
         if batches.is_empty() { return Ok(()); }
-        self.add_sequencer_batches(batches)?;
         let first_seq = batches[0].sequence_number;
-        let prev_meta = if first_seq > 0 {
+        let mut prev_meta = if first_seq > 0 {
             self.get_batch_metadata(first_seq - 1)?
         } else {
             BatchMetadata { accumulator: B256::ZERO, message_count: 0, delayed_message_count: 0, parent_chain_block: 0 }
         };
+
         let mut backend = self.build_backend(batches);
-        let mut mux = InboxMultiplexer::new(backend, prev_meta.delayed_message_count);
+        let mut last_delayed_for_mux = prev_meta.delayed_message_count;
+
+        let db_count = {
+            let data = self.db.get(MESSAGE_COUNT_KEY)?;
+            let mut bytes = data.as_slice();
+            <u64 as alloy_rlp::Decodable>::decode(&mut bytes)?
+        };
+
+        if db_count != prev_meta.message_count {
+            let batch_count = self.get_batch_count().unwrap_or(0);
+            if batch_count == 0 && first_seq == 0 && db_count > 0 {
+                tracing::info!(
+                    "inbox_tracker: cold-start align prev_meta.message_count from {} -> {} (no batch metadata, first_seq=0)",
+                    prev_meta.message_count,
+                    db_count
+                );
+                prev_meta.message_count = db_count;
+                if prev_meta.delayed_message_count == 0 {
+                    if let Ok(cur_delayed) = self.get_delayed_count() {
+                        last_delayed_for_mux = cur_delayed;
+                    }
+                }
+            } else {
+                match self.find_inbox_batch_containing_message(db_count) {
+                    Ok((batch_idx, ok)) if ok => {
+                        if batch_idx == first_seq {
+                            tracing::info!(
+                                "inbox_tracker: aligning prev_meta.message_count from {} -> {} for first_seq={}",
+                                prev_meta.message_count,
+                                db_count,
+                                first_seq
+                            );
+                            prev_meta.message_count = db_count;
+                            if prev_meta.delayed_message_count == 0 {
+                                if let Ok(cur_delayed) = self.get_delayed_count() {
+                                    last_delayed_for_mux = cur_delayed;
+                                }
+                            }
+                        } else {
+                            tracing::warn!(
+                                "inbox_tracker: batch_idx {} for db_count {} does not match first_seq {}; skipping window",
+                                batch_idx, db_count, first_seq
+                            );
+                            return Ok(());
+                        }
+                    }
+                    _ => {
+                        tracing::warn!(
+                            "inbox_tracker: could not map db_count {} to a batch; skipping window",
+                            db_count
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        let mut mux = InboxMultiplexer::new(backend, last_delayed_for_mux);
         let mut out: Vec<MessageWithMetadataAndBlockInfo> = Vec::new();
         loop {
             match mux.pop()? {
@@ -246,8 +407,18 @@ impl<D: Database> InboxTracker<D> {
                 None => break,
             }
         }
+
         if !out.is_empty() {
+            let cur_db_count = {
+                let data = self.db.get(MESSAGE_COUNT_KEY)?;
+                let mut bytes = data.as_slice();
+                <u64 as alloy_rlp::Decodable>::decode(&mut bytes)?
+            };
+            if cur_db_count != prev_meta.message_count {
+                anyhow::bail!("non-contiguous append: db_count {} != expected {}", cur_db_count, prev_meta.message_count);
+            }
             self.tx_streamer.add_confirmed_messages_and_end_batch(prev_meta.message_count, &out, None)?;
+            self.add_sequencer_batches(batches)?;
         }
         Ok(())
     }
@@ -363,14 +534,38 @@ impl<D: Database> InboxTracker<D> {
             if *seqnum != pos {
                 anyhow::bail!("unexpected delayed sequence number {}, expected {}", seqnum, pos);
             }
+            let msg = parse_incoming_l1_message_legacy(msg_bytes)?;
+            let body_hash = delayed_message_body_hash(&msg);
+            let computed_after = hash_after(next_acc, body_hash.as_slice());
             if next_acc != *before_acc {
+                tracing::error!(
+                    seqnum = *seqnum,
+                    expected_before = ?before_acc,
+                    have_before = ?next_acc,
+                    computed_after_prev = ?computed_after,
+                    kind = msg.header.kind,
+                    poster = %msg.header.poster,
+                    block_number = msg.header.block_number,
+                    timestamp = msg.header.timestamp,
+                    request_id = ?msg.header.request_id,
+                    l1_base_fee = %msg.header.l1_base_fee,
+                    l2_keccak = %alloy_primitives::keccak256(&msg.l2msg),
+                    "previous delayed accumulator mismatch"
+                );
                 anyhow::bail!("previous delayed accumulator mismatch for message {}", seqnum);
+            } else {
+                tracing::info!(
+                    seqnum = *seqnum,
+                    before = ?before_acc,
+                    after = ?computed_after,
+                    "delayed message accumulator ok"
+                );
             }
             let mut data = next_acc.0.to_vec();
             data.extend_from_slice(msg_bytes);
             let key = db_key(RLP_DELAYED_MESSAGE_PREFIX, *seqnum);
             batch.put(&key, &data)?;
-            next_acc = hash_after(next_acc, msg_bytes);
+            next_acc = computed_after;
             pos += 1;
         }
         self.set_delayed_count_reorg_and_write_batch(batch.as_mut(), first_pos, pos, true)?;

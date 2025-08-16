@@ -1,5 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
+use tracing::info;
 
 #[derive(Clone)]
 pub struct RpcClient {
@@ -35,6 +37,8 @@ impl RpcClient {
     }
 
     pub async fn call<T: for<'de> serde::Deserialize<'de>, P: serde::Serialize>(&self, method: &str, params: P) -> Result<T> {
+        let started = Instant::now();
+        info!("l1_rpc: calling method={}", method);
         let req = RpcReq { jsonrpc: "2.0", id: 1, method, params };
         let resp = self.http.post(&self.url).json(&req).send().await?;
         let status = resp.status();
@@ -46,6 +50,9 @@ impl RpcClient {
         if let Some(err) = parsed.error {
             anyhow::bail!("rpc error {}: {}", err.code, err.message);
         }
-        parsed.result.ok_or_else(|| anyhow::anyhow!("missing result"))
+        let out = parsed.result.ok_or_else(|| anyhow::anyhow!("missing result"))?;
+        let elapsed = started.elapsed().as_millis();
+        info!("l1_rpc: method={} ok elapsed_ms={}", method, elapsed);
+        Ok(out)
     }
 }

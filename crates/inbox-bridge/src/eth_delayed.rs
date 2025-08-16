@@ -1,3 +1,4 @@
+use crate::selectors::{SIG_DELAYED_COUNT, SIG_DELAYED_INBOX_ACCS, SIG_SEND_L2_FROM_ORIGIN, EVT_MESSAGE_DELIVERED, EVT_INBOX_MESSAGE_DELIVERED, EVT_INBOX_MESSAGE_FROM_ORIGIN};
 use crate::rpc::RpcClient;
 use crate::traits::DelayedBridge;
 use crate::types::DelayedInboxMessage;
@@ -26,6 +27,11 @@ struct RpcLog {
 struct RpcTx {
     input: String,
 }
+#[derive(Deserialize)]
+struct RpcBlock {
+    number: String,
+}
+
 
 pub struct EthDelayedBridge {
     rpc: Arc<RpcClient>,
@@ -66,14 +72,14 @@ impl EthDelayedBridge {
 impl DelayedBridge for EthDelayedBridge {
     async fn get_message_count(&self, block_number: u64) -> anyhow::Result<u64> {
         let mut data = Vec::with_capacity(4);
-        data.extend_from_slice(&Self::encode_selector("delayedMessageCount()"));
+        data.extend_from_slice(&Self::encode_selector(SIG_DELAYED_COUNT));
         let to_hex = format!("{:#x}", self.bridge_addr);
         let block_tag = format!("0x{:x}", block_number);
         let res_hex: String = self.rpc.call("eth_call", json!([{
-            "to": to_hex,
-            "data": format!("0x{}", hex::encode(data)),
+            "to": to_hex.clone(),
+            "data": format!("0x{}", hex::encode(&data)),
         }, block_tag])).await?;
-        let res = hex::decode(res_hex.trim_start_matches("0x"))?;
+        let mut res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             anyhow::bail!("short returndata for delayedMessageCount")
         }
@@ -81,17 +87,21 @@ impl DelayedBridge for EthDelayedBridge {
         Ok(count.try_into().map_err(|_| anyhow::anyhow!("count overflow"))?)
     }
 
-    async fn get_accumulator(&self, seq_num: u64, block_number: u64, _block_hash: B256) -> anyhow::Result<B256> {
+    async fn get_accumulator(&self, seq_num: u64, block_number: u64, block_hash: B256) -> anyhow::Result<B256> {
         let mut data = Vec::with_capacity(4 + 32);
-        data.extend_from_slice(&Self::encode_selector("delayedInboxAccs(uint256)"));
+        data.extend_from_slice(&Self::encode_selector(SIG_DELAYED_INBOX_ACCS));
         data.extend_from_slice(&Self::encode_u256(U256::from(seq_num)));
         let to_hex = format!("{:#x}", self.bridge_addr);
-        let block_tag = format!("0x{:x}", block_number);
+        let block_id = if block_hash != B256::ZERO {
+            json!({"blockHash": format!("{:#x}", block_hash)})
+        } else {
+            json!(format!("0x{:x}", block_number))
+        };
         let res_hex: String = self.rpc.call("eth_call", json!([{
-            "to": to_hex,
-            "data": format!("0x{}", hex::encode(data)),
-        }, block_tag])).await?;
-        let res = hex::decode(res_hex.trim_start_matches("0x"))?;
+            "to": to_hex.clone(),
+            "data": format!("0x{}", hex::encode(&data)),
+        }, block_id])).await?;
+        let mut res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
             anyhow::bail!("short returndata for delayedInboxAccs")
         }
@@ -107,8 +117,7 @@ impl DelayedBridge for EthDelayedBridge {
     where
         F: Fn(u64) -> anyhow::Result<Vec<u8>> + Send + Sync,
     {
-        let message_delivered_topic: B256 =
-            keccak256("MessageDelivered(uint256,bytes32,address,uint8,address,bytes32,uint256,uint64)".as_bytes());
+        let message_delivered_topic: B256 = keccak256(EVT_MESSAGE_DELIVERED.as_bytes());
         let filter = json!({
             "fromBlock": format!("0x{:x}", from_block),
             "toBlock": format!("0x{:x}", to_block),
@@ -116,17 +125,19 @@ impl DelayedBridge for EthDelayedBridge {
             "topics": [[format!("{:#x}", message_delivered_topic)]],
         });
         let logs: Vec<RpcLog> = self.rpc.call("eth_getLogs", json!([filter])).await?;
+        tracing::info!(target: "eth_delayed", "MessageDelivered logs fetched addr={} from={} to={} count={}", format!("{:#x}", self.bridge_addr), from_block, to_block, logs.len());
 
         let mut inbox_addresses: BTreeSet<Address> = BTreeSet::new();
         let mut message_ids: Vec<B256> = Vec::with_capacity(logs.len());
-        let mut parsed: Vec<(DelayedInboxMessage, Address, B256)> = Vec::with_capacity(logs.len());
+        let mut parsed: Vec<(DelayedInboxMessage, Address, B256, B256)> = Vec::with_capacity(logs.len());
 
         for lg in logs {
             let data_bytes = hex::decode(lg.data.trim_start_matches("0x"))?;
             if lg.topics.len() < 2 || data_bytes.len() < 32 * 5 {
                 continue;
             }
-            let message_index = U256::from_be_bytes(B256::from_str(&lg.topics[1]).unwrap_or_default().0).to::<u64>();
+            let msg_index_b256 = B256::from_str(&lg.topics[1]).unwrap_or_default();
+            let message_index = U256::from_be_bytes(msg_index_b256.0).to::<u64>();
             let before_acc = B256::from_str(&lg.topics[2]).unwrap_or_default();
 
             let inbox_addr = Address::from_slice(&data_bytes[12..32]);
@@ -136,15 +147,25 @@ impl DelayedBridge for EthDelayedBridge {
             let basefee = Self::decode_u256_word(&data_bytes[128..160])?;
             let timestamp = Self::decode_u256_word(&data_bytes[160..192])?.to::<u64>();
 
-            let block_number = lg.blockNumber.as_deref().and_then(|h| u64::from_str_radix(h.trim_start_matches("0x"), 16).ok()).unwrap_or_default();
             let block_hash = lg.blockHash.as_deref().and_then(|h| B256::from_str(h).ok()).unwrap_or_default();
+            let parent_chain_block_number = lg
+                .blockNumber
+                .as_deref()
+                .and_then(|h| u64::from_str_radix(h.trim_start_matches("0x"), 16).ok())
+                .unwrap_or_default();
+            let l1_block_number = if let Some(bh) = lg.blockHash.as_deref() {
+                let blk: RpcBlock = self.rpc.call("eth_getBlockByHash", json!([bh, false])).await?;
+                u64::from_str_radix(blk.number.trim_start_matches("0x"), 16).unwrap_or_default()
+            } else {
+                parent_chain_block_number
+            };
 
             let header = nitro_primitives::l1::L1IncomingMessageHeader {
                 kind,
                 poster: sender,
-                block_number,
+                block_number: l1_block_number,
                 timestamp,
-                request_id: Some(message_data_hash),
+                request_id: Some(msg_index_b256),
                 l1_base_fee: basefee,
             };
             let msg = nitro_primitives::l1::L1IncomingMessage { header, l2msg: Vec::new(), batch_gas_cost: None };
@@ -153,19 +174,19 @@ impl DelayedBridge for EthDelayedBridge {
                 block_hash,
                 before_inbox_acc: before_acc,
                 message: msg,
-                parent_chain_block_number: block_number,
+                parent_chain_block_number,
             };
             inbox_addresses.insert(inbox_addr);
-            message_ids.push(message_data_hash);
-            parsed.push((dim, inbox_addr, message_data_hash));
+            message_ids.push(msg_index_b256);
+            parsed.push((dim, inbox_addr, msg_index_b256, message_data_hash));
         }
 
         if parsed.is_empty() {
             return Ok(Vec::new());
         }
 
-        let inbox_msg_delivered: B256 = keccak256("InboxMessageDelivered(uint256,bytes)".as_bytes());
-        let inbox_msg_from_origin: B256 = keccak256("InboxMessageDeliveredFromOrigin(uint256)".as_bytes());
+        let inbox_msg_delivered: B256 = keccak256(EVT_INBOX_MESSAGE_DELIVERED.as_bytes());
+        let inbox_msg_from_origin: B256 = keccak256(EVT_INBOX_MESSAGE_FROM_ORIGIN.as_bytes());
 
         let mut data_by_id: HashMap<B256, Vec<u8>> = HashMap::with_capacity(message_ids.len());
         if !inbox_addresses.is_empty() {
@@ -204,7 +225,7 @@ impl DelayedBridge for EthDelayedBridge {
                         let input = hex::decode(tx.input.trim_start_matches("0x"))?;
                         if input.len() >= 4 + 32 {
                             let selector = &input[0..4];
-                            let expected = Self::encode_selector("sendL2MessageFromOrigin(bytes)");
+                            let expected = Self::encode_selector(SIG_SEND_L2_FROM_ORIGIN);
                             if selector == expected {
                                 if input.len() >= 4 + 64 {
                                     let mut len_bytes = [0u8; 32];
@@ -223,14 +244,17 @@ impl DelayedBridge for EthDelayedBridge {
         }
 
         let mut out: Vec<DelayedInboxMessage> = Vec::with_capacity(parsed.len());
-        for (mut dim, _inbox, req_id) in parsed {
-            if let Some(data) = data_by_id.get(&req_id) {
-                dim.message.l2msg = data.clone();
+        for (mut dim, _inbox, req_id, expected_hash) in parsed {
+            let data = data_by_id.get(&req_id).ok_or_else(|| anyhow::anyhow!(format!("message {} data not found", U256::from_be_bytes(req_id.0))))?;
+            let found_hash = B256::from(keccak256(&data));
+            if found_hash != expected_hash {
+                return Err(anyhow::anyhow!(format!("found message {} data with mismatched hash: expected {:#x} got {:#x}", U256::from_be_bytes(req_id.0), expected_hash, found_hash)));
             }
+            dim.message.l2msg = data.clone();
             out.push(dim);
         }
 
-        out.sort_by_key(|m| U256::from_be_bytes(m.message.header.request_id.unwrap().0));
+        out.sort_by_key(|m| m.seq_num);
         Ok(out)
     }
 }

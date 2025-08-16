@@ -32,7 +32,17 @@ async fn main() -> anyhow::Result<()> {
             || arg.starts_with("--feed-port")
             || arg.starts_with("--poster-enable")
             || arg.starts_with("--poster-4844-enable")
-            || arg.starts_with("--validator-enable");
+            || arg.starts_with("--validator-enable")
+            || arg.starts_with("--l1-rpc-url")
+            || arg.starts_with("--sequencer-inbox")
+            || arg.starts_with("--delayed-bridge")
+            || arg.starts_with("--first-message-block")
+            || arg.starts_with("--chaininfo-file")
+            || arg.starts_with("--db-path")
+            || arg.starts_with("--beacon-url")
+            || arg.starts_with("--secondary-beacon-url")
+            || arg.starts_with("--beacon-authorization")
+            || arg.starts_with("--beacon-blob-directory");
         if is_supported {
             let takes_value = arg.starts_with("--network")
                 || arg.starts_with("--sync-till-block")
@@ -40,7 +50,17 @@ async fn main() -> anyhow::Result<()> {
                 || arg.starts_with("--rpc-host")
                 || arg.starts_with("--rpc-port")
                 || arg.starts_with("--ws-port")
-                || arg.starts_with("--feed-port");
+                || arg.starts_with("--feed-port")
+                || arg.starts_with("--l1-rpc-url")
+                || arg.starts_with("--sequencer-inbox")
+                || arg.starts_with("--delayed-bridge")
+                || arg.starts_with("--first-message-block")
+                || arg.starts_with("--chaininfo-file")
+                || arg.starts_with("--db-path")
+                || arg.starts_with("--beacon-url")
+                || arg.starts_with("--secondary-beacon-url")
+                || arg.starts_with("--beacon-authorization")
+                || arg.starts_with("--beacon-blob-directory");
             filtered.push(arg.clone());
             if takes_value && !arg.contains('=') {
                 if let Some(val) = it.next() {

@@ -8,7 +8,6 @@ use nitro_batch_poster::poster::PosterService;
 use nitro_validator::ValidatorService;
 
 use alloy_primitives::Address;
-use alloy_chains::Chain;
 
 use crate::config::NodeArgs;
 
@@ -18,6 +17,7 @@ use reth_node_core::args::NetworkArgs;
 use reth_node_builder::NodeBuilder;
 use reth_arbitrum_node::{ArbNode, args::RollupArgs};
 use reth_tasks::TaskManager;
+use crate::chaininfo;
 
 pub struct NitroNode {
     pub args: NodeArgs,
@@ -69,12 +69,24 @@ impl NitroNode {
     pub async fn start(self) -> Result<()> {
         info!("starting nitro-rs node; args: {:?}", self.args);
 
-        let db_path = std::env::var("NITRO_DB_PATH").unwrap_or_else(|_| "./nitro-db".to_string());
+        let db_path = self.args.db_path.clone();
         let db = Arc::new(nitro_db_sled::SledDb::open(&db_path)?);
 
-        let mut l1_rpc = std::env::var("NITRO_L1_RPC").unwrap_or_else(|_| "http://localhost:8545".to_string());
-        let mut delayed_bridge_addr_opt: Option<Address> = None;
-        let mut sequencer_inbox_addr_opt: Option<Address> = None;
+        let mut l1_rpc = if let Some(v) = self.args.l1_rpc_url.clone() {
+            v
+        } else {
+            std::env::var("NITRO_L1_RPC").unwrap_or_else(|_| "http://localhost:8545".to_string())
+        };
+        let mut delayed_bridge_addr_opt: Option<Address> = self
+            .args
+            .delayed_bridge
+            .as_deref()
+            .and_then(|s| Address::from_str(s).ok());
+        let mut sequencer_inbox_addr_opt: Option<Address> = self
+            .args
+            .sequencer_inbox
+            .as_deref()
+            .and_then(|s| Address::from_str(s).ok());
         let mut poster_enable_cfg = self.args.poster_enable;
         let mut parent_chain_bound_cfg: Option<String> = None;
         let mut poster_privkey_cfg: Option<String> = std::env::var("NITRO_L1_POSTER_KEY").ok();
@@ -157,9 +169,72 @@ impl NitroNode {
             Some("local") => 1337u64,
             Some(_) => 421_614u64,
         };
-        let mut spec = reth_chainspec::ChainSpec::default();
-        spec.chain = Chain::from(chain_id);
+        let beacon_url_opt = self.args.beacon_url.clone().or_else(|| std::env::var("NITRO_BEACON_URL").ok());
+        let secondary_beacon_url_opt = self.args.secondary_beacon_url.clone().or_else(|| std::env::var("NITRO_BEACON_URL_SECONDARY").ok());
+        let beacon_auth_opt = self.args.beacon_authorization.clone().or_else(|| std::env::var("NITRO_BEACON_AUTH").ok());
+        let beacon_blob_dir_opt = self.args.beacon_blob_directory.clone().or_else(|| std::env::var("NITRO_BEACON_BLOB_DIR").ok());
+
+        let chains = if let Some(path) = self.args.chaininfo_file.as_deref() {
+            let text = std::fs::read_to_string(path)?;
+            let vec: Vec<chaininfo::ChainInfo> = serde_json::from_str(&text)?;
+            chaininfo::Chains(vec)
+        } else {
+            chaininfo::load_embedded()?
+        };
+        let chain_entry = chains
+            .select_by_chain_id(chain_id)
+            .or_else(|| chains.select_by_name("sepolia-rollup"))
+            .ok_or_else(|| anyhow::anyhow!("sepolia chain info not found"))?;
+        let rollup = chain_entry.rollup.as_ref().ok_or_else(|| anyhow::anyhow!("rollup addresses missing"))?;
+        let json_bridge_addr = Address::from_str(&rollup.bridge)?;
+        let json_seq_inbox_addr = Address::from_str(&rollup.sequencer_inbox)?;
+        let json_deployed_at = rollup.deployed_at.unwrap_or(0);
+        tracing::info!("chaininfo: selected={} chain_id={:?}", chain_entry.chain_name.as_deref().unwrap_or("unknown"), chain_entry.chain_id);
+        tracing::info!("chaininfo: rollup.bridge={} seq_inbox={} deployed_at={}", rollup.bridge, rollup.sequencer_inbox, json_deployed_at);
+
+
+        let delayed_bridge_addr = if let Some(a) = delayed_bridge_addr_opt { a } else { json_bridge_addr };
+        let sequencer_inbox_addr = if let Some(a) = sequencer_inbox_addr_opt { a } else { json_seq_inbox_addr };
+
+        let header_reader = Arc::new(inbox_bridge::header_reader::HttpHeaderReader::new_http(&l1_rpc, 1000).await?);
+        let delayed_bridge = Arc::new(inbox_bridge::eth_delayed::EthDelayedBridge::new_http(&l1_rpc, delayed_bridge_addr).await?);
+        let sequencer_inbox = Arc::new(inbox_bridge::eth_sequencer::EthSequencerInbox::new_http(&l1_rpc, sequencer_inbox_addr).await?);
+
+        let spec = {
+            let name = chain_entry.chain_name.clone().unwrap_or_default().to_lowercase();
+            if name == "sepolia-rollup" || chain_entry.chain_id == Some(421_614) {
+                let l2_rpc = self
+                    .args
+                    .l2_rpc_url
+                    .clone()
+                    .or_else(|| std::env::var("NITRO_L2_RPC").ok())
+                    .unwrap_or_else(|| "https://arb-sepolia.g.alchemy.com/v2/lC2HDPB2Vs7-p-UPkgKD-VqFulU5elyk".to_string());
+                let spec = crate::genesis::GenesisBootstrap::build_spec_from_baked_genesis(&chain_entry, &l2_rpc).await?;
+                let gh = spec.genesis_hash();
+                tracing::info!("sepolia baked genesis header loaded; hash={gh:?} chain_id={}", spec.chain.id());
+                spec
+            } else if let Some(spec) = crate::genesis::GenesisBootstrap::build_spec_from_init_message(
+                &chain_entry,
+                delayed_bridge.as_ref(),
+                header_reader.as_ref(),
+                json_deployed_at,
+            ).await? {
+                let gh = spec.genesis_hash();
+                tracing::info!("computed L2 genesis hash from init message: {gh:?}, chain_id={}", spec.chain.id());
+                spec
+            } else {
+                return Err(anyhow::anyhow!("init message not found; no baked genesis path for this chain"));
+            }
+        };
+        if let Some(url) = &beacon_url_opt {
+            tracing::info!("beacon client configured: url={}", url);
+        } else {
+            tracing::warn!("no beacon-url configured; blob-sidecar fetching may fail for 4844 batches");
+        }
         let net = NetworkArgs::default().with_unused_ports();
+        let genesis_hash = spec.genesis_hash();
+        let genesis_header = spec.genesis_header().clone();
+        let genesis_timestamp = genesis_header.timestamp;
         let arb_cfg = NodeConfig::new(Arc::new(spec))
             .with_network(net)
             .with_rpc(rpc);
@@ -175,44 +250,30 @@ impl NitroNode {
         let beacon_handle = arb_handle.node.add_ons_handle.beacon_engine_handle.clone();
         let payload_handle = arb_handle.node.payload_builder_handle.clone();
 
-        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(db.clone(), beacon_handle, payload_handle);
+        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(db.clone(), beacon_handle, payload_handle, genesis_hash, genesis_timestamp);
         let streamer_impl = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone(), exec));
         let streamer_trait = streamer_impl.clone() as Arc<dyn nitro_inbox::streamer::Streamer>;
 
-        let header_reader = Arc::new(inbox_bridge::header_reader::HttpHeaderReader::new_http(&l1_rpc, 1000).await?);
-
-        let delayed_bridge_addr = if let Some(a) = delayed_bridge_addr_opt {
-            a
-        } else {
-            let delayed_bridge_addr_str = std::env::var("NITRO_DELAYED_BRIDGE")?;
-            Address::from_str(delayed_bridge_addr_str.trim())?
-        };
-        let sequencer_inbox_addr = if let Some(a) = sequencer_inbox_addr_opt {
-            a
-        } else {
-            let sequencer_inbox_addr_str = std::env::var("NITRO_SEQUENCER_INBOX")?;
-            Address::from_str(sequencer_inbox_addr_str.trim())?
-        };
-
-        let delayed_bridge = Arc::new(inbox_bridge::eth_delayed::EthDelayedBridge::new_http(
-            &l1_rpc,
-            delayed_bridge_addr,
-        ).await?);
-
-        let sequencer_inbox = Arc::new(inbox_bridge::eth_sequencer::EthSequencerInbox::new_http(
-            &l1_rpc,
-            sequencer_inbox_addr,
-        ).await?);
-
-        let reader_config: nitro_inbox_reader::reader::InboxReaderConfigFetcher = Arc::new(|| nitro_inbox_reader::reader::InboxReaderConfig::default());
+        let reader_config: nitro_inbox_reader::reader::InboxReaderConfigFetcher = Arc::new(|| {
+            let mut cfg = nitro_inbox_reader::reader::InboxReaderConfig::default();
+            cfg.check_delay_ms = 5_000;
+            cfg.default_blocks_to_read = 200;
+            cfg.max_blocks_to_read = 5000;
+            cfg
+        });
 
         let tracker = Arc::new(nitro_inbox::tracker::InboxTracker::new(db.clone(), streamer_trait.clone()));
         tracker.initialize()?;
 
-        let first_msg_block: u64 = std::env::var("NITRO_FIRST_MESSAGE_BLOCK")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
+        let first_msg_block: u64 = if let Some(v) = self.args.first_message_block {
+            v
+        } else {
+            std::env::var("NITRO_FIRST_MESSAGE_BLOCK")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(json_deployed_at)
+        };
+        tracing::info!("inbox_reader: first_message_block={}", first_msg_block);
         let _ = nitro_rpc::register_backend(tracker.clone(), streamer_impl.clone());
 
         let inbox_reader = nitro_inbox_reader::reader::InboxReader::new(
