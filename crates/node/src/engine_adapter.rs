@@ -134,6 +134,13 @@ impl ExecEngine for RethExecEngine {
             withdrawals: None,
             parent_beacon_block_root: None,
         };
+        let follower_attrs: alloy_rpc_types_engine::PayloadAttributes = alloy_rpc_types_engine::PayloadAttributes {
+            timestamp: ts,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: None,
+            parent_beacon_block_root: None,
+        };
 
         if msg_idx == 0 {
             let fc = ForkchoiceState {
@@ -165,7 +172,16 @@ impl ExecEngine for RethExecEngine {
             let follower = self.follower_executor.as_ref().ok_or_else(|| anyhow!("missing follower executor"))?;
             let l2msg_bytes = msg.message.l2msg.as_ref();
             let (block_hash, send_root) = follower
-                .execute_message_to_block(parent_hash, rpc_attrs.clone(), l2msg_bytes)
+                .execute_message_to_block(
+                    parent_hash,
+                    follower_attrs.clone(),
+                    l2msg_bytes,
+                    msg.message.header.poster,
+                    msg.message.header.request_id,
+                    msg.message.header.kind,
+                    msg.message.header.l1_base_fee,
+                    msg.message.batch_gas_cost,
+                )
                 .await
                 .map_err(|e| anyhow!("follower execute_message_to_block failed: {e}"))?;
             let _ = self.last_timestamp.fetch_max(ts, Ordering::Relaxed);
