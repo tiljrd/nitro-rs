@@ -7,7 +7,7 @@ use nitro_streamer::engine::ExecEngine;
 use nitro_primitives::message::{MessageResult, MessageWithMetadata};
 use nitro_inbox::db::Database;
 
-use nitro_primitives::dbkeys::{MESSAGE_COUNT_KEY, MESSAGE_RESULT_PREFIX, db_key};
+use nitro_primitives::dbkeys::{MESSAGE_COUNT_KEY, MESSAGE_RESULT_PREFIX, MESSAGE_PREFIX, db_key};
 use alloy_rlp::Decodable;
 
 use reth_node_api::BeaconConsensusEngineHandle;
@@ -171,7 +171,7 @@ impl ExecEngine for RethExecEngine {
         if self.payload_builder_handle.is_none() {
             let follower = self.follower_executor.as_ref().ok_or_else(|| anyhow!("missing follower executor"))?;
             let l2msg_bytes = msg.message.l2msg.as_ref();
-            let (block_hash, send_root) = follower
+            match follower
                 .execute_message_to_block(
                     parent_hash,
                     follower_attrs.clone(),
@@ -183,10 +183,91 @@ impl ExecEngine for RethExecEngine {
                     msg.message.batch_gas_cost,
                 )
                 .await
-                .map_err(|e| anyhow!("follower execute_message_to_block failed: {e}"))?;
-            tracing::info!("engine_adapter: follower produced block idx={} hash={:?} parent={:?}", msg_idx, block_hash, parent_hash);
-            let _ = self.last_timestamp.fetch_max(ts, Ordering::Relaxed);
-            return Ok(MessageResult { block_hash, send_root });
+            {
+                Ok((block_hash, send_root)) => {
+                    tracing::info!("engine_adapter: follower produced block idx={} hash={:?} parent={:?}", msg_idx, block_hash, parent_hash);
+                    let _ = self.last_timestamp.fetch_max(ts, Ordering::Relaxed);
+                    return Ok(MessageResult { block_hash, send_root });
+                }
+                Err(e) => {
+                    let es = format!("{e}");
+                    if es.contains("missing parent header") {
+                        tracing::warn!("engine_adapter: parent header missing; backfilling prior messages 0..{}", msg_idx.saturating_sub(1));
+                        let mut k: u64 = 0;
+                        while k < msg_idx {
+                            let key = db_key(MESSAGE_PREFIX, k);
+                            match self.db.get(&key) {
+                                Ok(data) => {
+                                    let mut slice = data.as_slice();
+                                    match MessageWithMetadata::decode(&mut slice) {
+                                        Ok(back_msg) => {
+                                            let parent_k = if k == 0 {
+                                                self.genesis_hash
+                                            } else {
+                                                let prev_key = db_key(MESSAGE_RESULT_PREFIX, k - 1);
+                                                let data_prev = self.db.get(&prev_key)?;
+                                                let mut s2 = data_prev.as_slice();
+                                                let prev_res = MessageResult::decode(&mut s2)
+                                                    .map_err(|e| anyhow!("failed to decode prev MessageResult during backfill: {e}"))?;
+                                                prev_res.block_hash
+                                            };
+                                            let mut ts_k = back_msg.message.header.timestamp;
+                                            let prev_ts = self.last_timestamp.load(Ordering::Relaxed);
+                                            if ts_k <= prev_ts {
+                                                ts_k = prev_ts.saturating_add(1);
+                                            }
+                                            self.last_timestamp.store(ts_k, Ordering::Relaxed);
+                                            let attrs_k: alloy_rpc_types_engine::PayloadAttributes = alloy_rpc_types_engine::PayloadAttributes {
+                                                timestamp: ts_k,
+                                                prev_randao: B256::ZERO,
+                                                suggested_fee_recipient: Address::ZERO,
+                                                withdrawals: None,
+                                                parent_beacon_block_root: None,
+                                            };
+                                            let _ = follower
+                                                .execute_message_to_block(
+                                                    parent_k,
+                                                    attrs_k,
+                                                    back_msg.message.l2msg.as_ref(),
+                                                    back_msg.message.header.poster,
+                                                    back_msg.message.header.request_id,
+                                                    back_msg.message.header.kind,
+                                                    back_msg.message.header.l1_base_fee,
+                                                    back_msg.message.batch_gas_cost,
+                                                )
+                                                .await;
+                                        }
+                                        Err(de) => {
+                                            tracing::warn!("engine_adapter: failed to decode backfill message {}: {de}", k);
+                                        }
+                                    }
+                                }
+                                Err(ge) => {
+                                    tracing::warn!("engine_adapter: backfill missing message {} in DB: {ge}", k);
+                                }
+                            }
+                            k += 1;
+                        }
+                        let (block_hash, send_root) = follower
+                            .execute_message_to_block(
+                                parent_hash,
+                                follower_attrs.clone(),
+                                l2msg_bytes,
+                                msg.message.header.poster,
+                                msg.message.header.request_id,
+                                msg.message.header.kind,
+                                msg.message.header.l1_base_fee,
+                                msg.message.batch_gas_cost,
+                            )
+                            .await
+                            .map_err(|e2| anyhow!("follower execute_message_to_block failed after backfill: {e2}"))?;
+                        tracing::info!("engine_adapter: follower produced block idx={} hash={:?} parent={:?} after backfill", msg_idx, block_hash, parent_hash);
+                        let _ = self.last_timestamp.fetch_max(ts, Ordering::Relaxed);
+                        return Ok(MessageResult { block_hash, send_root });
+                    }
+                    return Err(anyhow!("follower execute_message_to_block failed: {e}"));
+                }
+            }
         }
 
         let builder = self.payload_builder_handle.as_ref().unwrap();
