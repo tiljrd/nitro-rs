@@ -47,13 +47,13 @@ impl RethExecEngine {
     pub fn new_with_handles(
         db: Arc<dyn Database>,
         beacon_engine_handle: BeaconConsensusEngineHandle<PayloadTy>,
-        payload_builder_handle: PayloadBuilderHandle<PayloadTy>,
+        payload_builder_handle: Option<PayloadBuilderHandle<PayloadTy>>,
         genesis_hash: B256,
         genesis_timestamp: u64,
     ) -> Arc<Self> {
         Arc::new(Self {
             beacon_engine_handle: Some(beacon_engine_handle),
-            payload_builder_handle: Some(payload_builder_handle),
+            payload_builder_handle,
             db,
             genesis_hash,
             last_timestamp: AtomicU64::new(genesis_timestamp),
@@ -99,10 +99,12 @@ impl ExecEngine for RethExecEngine {
             .beacon_engine_handle
             .as_ref()
             .ok_or_else(|| anyhow!("missing beacon engine handle"))?;
-        let builder = self
-            .payload_builder_handle
-            .as_ref()
-            .ok_or_else(|| anyhow!("missing payload builder handle"))?;
+        let builder = match self.payload_builder_handle.as_ref() {
+            Some(h) => h,
+            None => {
+                return Err(anyhow!("payload builder disabled in follower mode; digest_message must import sequencer-provided payload"));
+            }
+        };
 
         let parent_hash = if msg_idx == 0 {
             self.genesis_hash
