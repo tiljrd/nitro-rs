@@ -3,8 +3,6 @@ use alloy_primitives::hex;
 use alloy_chains::Chain as AlloyChain;
 use reqwest;
 use serde_json::{json, Value};
-use reth_chainspec::Genesis as RethGenesis;
-use reth_primitives::Header as RethHeader;
 
 use std::collections::BTreeMap;
 
@@ -239,6 +237,7 @@ impl GenesisBootstrap {
         spec.chain = alloy_chains::Chain::from(chain_id);
         Ok(Some(spec))
     }
+}
 impl GenesisBootstrap {
     pub async fn build_spec_from_baked_genesis(
         chain_entry: &ChainInfo,
