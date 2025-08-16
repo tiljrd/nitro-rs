@@ -1,3 +1,11 @@
+use anyhow::{anyhow, Result};
+use alloy_primitives::hex;
+use alloy_chains::Chain as AlloyChain;
+use reqwest;
+use serde_json::{json, Value};
+use reth_chainspec::Genesis as RethGenesis;
+use reth_primitives::Header as RethHeader;
+
 use std::collections::BTreeMap;
 
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
@@ -231,4 +239,61 @@ impl GenesisBootstrap {
         spec.chain = alloy_chains::Chain::from(chain_id);
         Ok(Some(spec))
     }
+impl GenesisBootstrap {
+    pub async fn build_spec_from_baked_genesis(
+        chain_entry: &ChainInfo,
+        l2_rpc_url: &str,
+    ) -> Result<reth_chainspec::ChainSpec> {
+        let name = chain_entry
+            .chain_name
+            .as_deref()
+            .unwrap_or_default()
+            .to_lowercase();
+        if name != "sepolia-rollup" && chain_entry.chain_id != Some(421_614) {
+            return Err(anyhow!("baked genesis only supported for sepolia-rollup"));
+        }
+
+        let client = reqwest::Client::new();
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getBlockByNumber",
+            "params": ["0x0", false]
+        });
+        let resp = client.post(l2_rpc_url).json(&body).send().await?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("failed to fetch L2 genesis header"));
+        }
+        let v: serde_json::Value = resp.json().await?;
+        let block = v
+            .get("result")
+            .and_then(|r| r.as_object())
+            .ok_or_else(|| anyhow!("no block 0 result"))?;
+
+        let parent_hash = block.get("parentHash").and_then(|x| x.as_str()).unwrap_or_default();
+        if parent_hash != "0x0000000000000000000000000000000000000000000000000000000000000000" {
+            return Err(anyhow!("invalid parent hash for genesis"));
+        }
+
+        let base_fee_hex = block.get("baseFeePerGas").and_then(|x| x.as_str()).unwrap_or("0x0");
+        let ts_hex = block.get("timestamp").and_then(|x| x.as_str()).unwrap_or("0x0");
+        let state_root_hex = block.get("stateRoot").and_then(|x| x.as_str()).unwrap_or("0x0");
+        let gas_limit_hex = block.get("gasLimit").and_then(|x| x.as_str()).unwrap_or("0x0");
+        let extra_data_hex = block.get("extraData").and_then(|x| x.as_str()).unwrap_or("0x");
+
+        let chain_id = chain_entry.chain_id.unwrap_or(421_614) as u64;
+
+        let spec = reth_arbitrum_chainspec::sepolia_baked_genesis_from_header(
+            chain_id,
+            base_fee_hex,
+            ts_hex,
+            state_root_hex,
+            gas_limit_hex,
+            extra_data_hex,
+        )?;
+
+        Ok(spec)
+    }
+}
+
 }

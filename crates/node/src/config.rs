@@ -5,6 +5,9 @@ pub struct NodeArgs {
     #[arg(long = "l1-rpc-url", env = "NITRO_L1_RPC")]
     pub l1_rpc_url: Option<String>,
 
+    #[arg(long = "l2-rpc-url", env = "NITRO_L2_RPC")]
+    pub l2_rpc_url: Option<String>,
+
     #[arg(long = "sequencer-inbox", env = "NITRO_SEQUENCER_INBOX")]
     pub sequencer_inbox: Option<String>,
 

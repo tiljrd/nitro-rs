@@ -25,11 +25,11 @@ impl Default for InboxReaderConfig {
     fn default() -> Self {
         Self {
             delay_blocks: 0,
-            check_delay_ms: 60_000,
+            check_delay_ms: 5_000,
             min_blocks_to_read: 1,
-            default_blocks_to_read: 100,
+            default_blocks_to_read: 200,
             target_messages_read: 500,
-            max_blocks_to_read: 2000,
+            max_blocks_to_read: 5_000,
             read_mode: "latest".to_string(),
         }
     }

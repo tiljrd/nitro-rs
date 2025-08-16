@@ -200,17 +200,31 @@ impl NitroNode {
         let delayed_bridge = Arc::new(inbox_bridge::eth_delayed::EthDelayedBridge::new_http(&l1_rpc, delayed_bridge_addr).await?);
         let sequencer_inbox = Arc::new(inbox_bridge::eth_sequencer::EthSequencerInbox::new_http(&l1_rpc, sequencer_inbox_addr).await?);
 
-        let spec = if let Some(spec) = crate::genesis::GenesisBootstrap::build_spec_from_init_message(
-            &chain_entry,
-            delayed_bridge.as_ref(),
-            header_reader.as_ref(),
-            json_deployed_at,
-        ).await? {
-            let gh = spec.genesis_hash();
-            tracing::info!("computed L2 genesis hash from init message: {gh:?}, chain_id={}", spec.chain.id());
-            spec
-        } else {
-            return Err(anyhow::anyhow!("init message not found in L1 range; refusing to fall back to static chainspec"));
+        let spec = {
+            let name = chain_entry.chain_name.clone().unwrap_or_default().to_lowercase();
+            if name == "sepolia-rollup" || chain_entry.chain_id == Some(421_614) {
+                let l2_rpc = self
+                    .args
+                    .l2_rpc_url
+                    .clone()
+                    .or_else(|| std::env::var("NITRO_L2_RPC").ok())
+                    .unwrap_or_else(|| "https://arb-sepolia.g.alchemy.com/v2/lC2HDPB2Vs7-p-UPkgKD-VqFulU5elyk".to_string());
+                let spec = crate::genesis::GenesisBootstrap::build_spec_from_baked_genesis(&chain_entry, &l2_rpc).await?;
+                let gh = spec.genesis_hash();
+                tracing::info!("sepolia baked genesis header loaded; hash={gh:?} chain_id={}", spec.chain.id());
+                spec
+            } else if let Some(spec) = crate::genesis::GenesisBootstrap::build_spec_from_init_message(
+                &chain_entry,
+                delayed_bridge.as_ref(),
+                header_reader.as_ref(),
+                json_deployed_at,
+            ).await? {
+                let gh = spec.genesis_hash();
+                tracing::info!("computed L2 genesis hash from init message: {gh:?}, chain_id={}", spec.chain.id());
+                spec
+            } else {
+                return Err(anyhow::anyhow!("init message not found; no baked genesis path for this chain"));
+            }
         };
         if let Some(url) = &beacon_url_opt {
             tracing::info!("beacon client configured: url={}", url);
