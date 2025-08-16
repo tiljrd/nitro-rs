@@ -7,7 +7,7 @@ use nitro_streamer::engine::ExecEngine;
 use nitro_primitives::message::{MessageResult, MessageWithMetadata};
 use nitro_inbox::db::Database;
 
-use nitro_primitives::dbkeys::{MESSAGE_COUNT_KEY, MESSAGE_RESULT_PREFIX, db_key};
+use nitro_primitives::dbkeys::{MESSAGE_COUNT_KEY, MESSAGE_RESULT_PREFIX, MESSAGE_PREFIX, db_key};
 use alloy_rlp::Decodable;
 
 use reth_node_api::BeaconConsensusEngineHandle;
@@ -21,6 +21,8 @@ use alloy_rpc_types_engine::ForkchoiceState;
 use reth_payload_primitives::PayloadKind;
 use reth_payload_primitives::EngineApiMessageVersion;
 use alloy_rpc_types_engine::PayloadStatusEnum;
+use reth_arbitrum_evm::header::extract_send_root_from_header_extra;
+use reth_arbitrum_node::follower::DynFollowerExecutor;
 
 
 type PayloadTy = ArbEngineTypes<ArbPayloadTypes>;
@@ -28,6 +30,7 @@ type PayloadTy = ArbEngineTypes<ArbPayloadTypes>;
 pub struct RethExecEngine {
     beacon_engine_handle: Option<BeaconConsensusEngineHandle<PayloadTy>>,
     payload_builder_handle: Option<PayloadBuilderHandle<PayloadTy>>,
+    follower_executor: Option<DynFollowerExecutor>,
     db: Arc<dyn Database>,
     genesis_hash: B256,
     last_timestamp: AtomicU64,
@@ -38,6 +41,7 @@ impl RethExecEngine {
         Arc::new(Self {
             beacon_engine_handle: None,
             payload_builder_handle: None,
+            follower_executor: None,
             db,
             genesis_hash,
             last_timestamp: AtomicU64::new(genesis_timestamp),
@@ -47,13 +51,15 @@ impl RethExecEngine {
     pub fn new_with_handles(
         db: Arc<dyn Database>,
         beacon_engine_handle: BeaconConsensusEngineHandle<PayloadTy>,
-        payload_builder_handle: PayloadBuilderHandle<PayloadTy>,
+        payload_builder_handle: Option<PayloadBuilderHandle<PayloadTy>>,
+        follower_executor: Option<DynFollowerExecutor>,
         genesis_hash: B256,
         genesis_timestamp: u64,
     ) -> Arc<Self> {
         Arc::new(Self {
             beacon_engine_handle: Some(beacon_engine_handle),
-            payload_builder_handle: Some(payload_builder_handle),
+            payload_builder_handle,
+            follower_executor,
             db,
             genesis_hash,
             last_timestamp: AtomicU64::new(genesis_timestamp),
@@ -99,10 +105,6 @@ impl ExecEngine for RethExecEngine {
             .beacon_engine_handle
             .as_ref()
             .ok_or_else(|| anyhow!("missing beacon engine handle"))?;
-        let builder = self
-            .payload_builder_handle
-            .as_ref()
-            .ok_or_else(|| anyhow!("missing payload builder handle"))?;
 
         let parent_hash = if msg_idx == 0 {
             self.genesis_hash
@@ -124,7 +126,15 @@ impl ExecEngine for RethExecEngine {
             ts = prev.saturating_add(1);
         }
         self.last_timestamp.store(ts, Ordering::Relaxed);
+
         let rpc_attrs = EthPayloadAttributes {
+            timestamp: ts,
+            prev_randao: B256::ZERO,
+            suggested_fee_recipient: Address::ZERO,
+            withdrawals: None,
+            parent_beacon_block_root: None,
+        };
+        let follower_attrs: alloy_rpc_types_engine::PayloadAttributes = alloy_rpc_types_engine::PayloadAttributes {
             timestamp: ts,
             prev_randao: B256::ZERO,
             suggested_fee_recipient: Address::ZERO,
@@ -154,10 +164,113 @@ impl ExecEngine for RethExecEngine {
             .fork_choice_updated(pre_fcu, None, EngineApiMessageVersion::default())
             .await
             .map_err(|e| anyhow!("engine pre fork_choice_updated error: {e}"))?;
-        tracing::info!("engine_adapter: pre-forkchoiceUpdated payload_status={:?}", pre_resp.payload_status);
         if pre_resp.is_invalid() {
             return Err(anyhow!("engine pre fork_choice_updated invalid: {:?}", pre_resp.payload_status));
         }
+
+        if self.payload_builder_handle.is_none() {
+            let follower = self.follower_executor.as_ref().ok_or_else(|| anyhow!("missing follower executor"))?;
+            let l2msg_bytes = msg.message.l2msg.as_ref();
+            match follower
+                .execute_message_to_block(
+                    parent_hash,
+                    follower_attrs.clone(),
+                    l2msg_bytes,
+                    msg.message.header.poster,
+                    msg.message.header.request_id,
+                    msg.message.header.kind,
+                    msg.message.header.l1_base_fee,
+                    msg.message.batch_gas_cost,
+                )
+                .await
+            {
+                Ok((block_hash, send_root)) => {
+                    tracing::info!("engine_adapter: follower produced block idx={} hash={:?} parent={:?}", msg_idx, block_hash, parent_hash);
+                    let _ = self.last_timestamp.fetch_max(ts, Ordering::Relaxed);
+                    return Ok(MessageResult { block_hash, send_root });
+                }
+                Err(e) => {
+                    let es = format!("{e}");
+                    if es.contains("missing parent header") {
+                        tracing::warn!("engine_adapter: parent header missing; backfilling prior messages 0..{}", msg_idx.saturating_sub(1));
+                        let mut k: u64 = 0;
+                        while k < msg_idx {
+                            let key = db_key(MESSAGE_PREFIX, k);
+                            match self.db.get(&key) {
+                                Ok(data) => {
+                                    let mut slice = data.as_slice();
+                                    match MessageWithMetadata::decode(&mut slice) {
+                                        Ok(back_msg) => {
+                                            let parent_k = if k == 0 {
+                                                self.genesis_hash
+                                            } else {
+                                                let prev_key = db_key(MESSAGE_RESULT_PREFIX, k - 1);
+                                                let data_prev = self.db.get(&prev_key)?;
+                                                let mut s2 = data_prev.as_slice();
+                                                let prev_res = MessageResult::decode(&mut s2)
+                                                    .map_err(|e| anyhow!("failed to decode prev MessageResult during backfill: {e}"))?;
+                                                prev_res.block_hash
+                                            };
+                                            let mut ts_k = back_msg.message.header.timestamp;
+                                            let prev_ts = self.last_timestamp.load(Ordering::Relaxed);
+                                            if ts_k <= prev_ts {
+                                                ts_k = prev_ts.saturating_add(1);
+                                            }
+                                            self.last_timestamp.store(ts_k, Ordering::Relaxed);
+                                            let attrs_k: alloy_rpc_types_engine::PayloadAttributes = alloy_rpc_types_engine::PayloadAttributes {
+                                                timestamp: ts_k,
+                                                prev_randao: B256::ZERO,
+                                                suggested_fee_recipient: Address::ZERO,
+                                                withdrawals: None,
+                                                parent_beacon_block_root: None,
+                                            };
+                                            let _ = follower
+                                                .execute_message_to_block(
+                                                    parent_k,
+                                                    attrs_k,
+                                                    back_msg.message.l2msg.as_ref(),
+                                                    back_msg.message.header.poster,
+                                                    back_msg.message.header.request_id,
+                                                    back_msg.message.header.kind,
+                                                    back_msg.message.header.l1_base_fee,
+                                                    back_msg.message.batch_gas_cost,
+                                                )
+                                                .await;
+                                        }
+                                        Err(de) => {
+                                            tracing::warn!("engine_adapter: failed to decode backfill message {}: {de}", k);
+                                        }
+                                    }
+                                }
+                                Err(ge) => {
+                                    tracing::warn!("engine_adapter: backfill missing message {} in DB: {ge}", k);
+                                }
+                            }
+                            k += 1;
+                        }
+                        let (block_hash, send_root) = follower
+                            .execute_message_to_block(
+                                parent_hash,
+                                follower_attrs.clone(),
+                                l2msg_bytes,
+                                msg.message.header.poster,
+                                msg.message.header.request_id,
+                                msg.message.header.kind,
+                                msg.message.header.l1_base_fee,
+                                msg.message.batch_gas_cost,
+                            )
+                            .await
+                            .map_err(|e2| anyhow!("follower execute_message_to_block failed after backfill: {e2}"))?;
+                        tracing::info!("engine_adapter: follower produced block idx={} hash={:?} parent={:?} after backfill", msg_idx, block_hash, parent_hash);
+                        let _ = self.last_timestamp.fetch_max(ts, Ordering::Relaxed);
+                        return Ok(MessageResult { block_hash, send_root });
+                    }
+                    return Err(anyhow!("follower execute_message_to_block failed: {e}"));
+                }
+            }
+        }
+
+        let builder = self.payload_builder_handle.as_ref().unwrap();
 
         let fcu_with_attrs = beacon
             .fork_choice_updated(
@@ -171,7 +284,6 @@ impl ExecEngine for RethExecEngine {
             )
             .await
             .map_err(|e| anyhow!("engine fork_choice_updated(with attrs) error: {e}"))?;
-        tracing::info!("engine_adapter: forkchoiceUpdated(with attrs) payload_status={:?}", fcu_with_attrs.payload_status);
         if fcu_with_attrs.is_invalid() {
             return Err(anyhow!("engine fork_choice_updated with attrs invalid: {:?}", fcu_with_attrs.payload_status));
         }
@@ -186,7 +298,6 @@ impl ExecEngine for RethExecEngine {
                         let msg = format!("{e}");
                         if msg.contains("missing parent header") && attempts < 60 {
                             attempts += 1;
-                            tracing::warn!("payload_builder: parent header not yet available, parent={:?}, retry {attempts}/60", parent_hash);
                             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                             continue;
                         }
@@ -195,7 +306,6 @@ impl ExecEngine for RethExecEngine {
                     Err(_) => {
                         if attempts < 10 {
                             attempts += 1;
-                            tracing::warn!("payload_builder: channel closed? retrying {attempts}/10");
                             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                             continue;
                         }
@@ -212,14 +322,7 @@ impl ExecEngine for RethExecEngine {
 
         let block_hash = built.block().hash();
         let header = built.block().header();
-        let send_root = {
-            let bytes = header.extra_data.as_ref();
-            if bytes.len() >= 32 {
-                B256::from_slice(&bytes[..32])
-            } else {
-                B256::ZERO
-            }
-        };
+        let send_root = extract_send_root_from_header_extra(header.extra_data.as_ref());
         let fcu_state = ForkchoiceState {
             head_block_hash: block_hash,
             safe_block_hash: parent_hash,
@@ -229,7 +332,6 @@ impl ExecEngine for RethExecEngine {
             .fork_choice_updated(fcu_state, None, EngineApiMessageVersion::default())
             .await
             .map_err(|e| anyhow!("engine fork_choice_updated error: {e}"))?;
-        tracing::info!("engine_adapter: forkchoiceUpdated payload_status={:?}", fcu_resp.payload_status);
         if !matches!(fcu_resp.payload_status.status, PayloadStatusEnum::Valid | PayloadStatusEnum::Syncing) {
             return Err(anyhow!("engine fork_choice_updated not valid/syncing: {:?}", fcu_resp.payload_status));
         }

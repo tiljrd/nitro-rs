@@ -11,6 +11,7 @@ members = [
     "crates/primitives",
     "crates/db-sled",
     "bin/arb-nitro-rs",
+    "bin/genesis-parity",
 ]
 resolver = "2"
 

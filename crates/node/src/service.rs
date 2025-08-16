@@ -243,14 +243,29 @@ impl NitroNode {
         let task_executor = task_manager.executor();
         let arb_handle = builder
             .testing_node(task_executor)
-            .node(ArbNode::new(RollupArgs::default()))
+            .node(ArbNode::new(RollupArgs {
+                compute_pending_block: false,
+                sequencer: self.args.sequencer,
+            }))
             .launch()
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
         let beacon_handle = arb_handle.node.add_ons_handle.beacon_engine_handle.clone();
-        let payload_handle = arb_handle.node.payload_builder_handle.clone();
+        let maybe_payload_handle = if self.args.sequencer {
+            Some(arb_handle.node.payload_builder_handle.clone())
+        } else {
+            None
+        };
+        let follower_executor = if self.args.sequencer { None } else { reth_arbitrum_node::follower::get_follower_executor() };
 
-        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(db.clone(), beacon_handle, payload_handle, genesis_hash, genesis_timestamp);
+        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(
+            db.clone(),
+            beacon_handle,
+            maybe_payload_handle,
+            follower_executor,
+            genesis_hash,
+            genesis_timestamp,
+        );
         let streamer_impl = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone(), exec));
         let streamer_trait = streamer_impl.clone() as Arc<dyn nitro_inbox::streamer::Streamer>;
 
