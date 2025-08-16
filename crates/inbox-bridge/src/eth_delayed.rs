@@ -75,26 +75,14 @@ impl DelayedBridge for EthDelayedBridge {
         let mut data = Vec::with_capacity(4);
         data.extend_from_slice(&Self::encode_selector(SIG_DELAYED_COUNT));
         let to_hex = format!("{:#x}", self.bridge_addr);
-        let from_hex = safe_from_for_proxy(&self.rpc, self.bridge_addr).await?;
         let block_tag = format!("0x{:x}", block_number);
         let res_hex: String = self.rpc.call("eth_call", json!([{
             "to": to_hex.clone(),
-            "from": from_hex,
             "data": format!("0x{}", hex::encode(&data)),
         }, block_tag])).await?;
         let mut res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
-            let impl_addr = crate::util::proxy_impl_address(&self.rpc, self.bridge_addr).await?;
-            let impl_hex = format!("{:#x}", impl_addr);
-            let block_tag = format!("0x{:x}", block_number);
-            let res2_hex: String = self.rpc.call("eth_call", json!([{
-                "to": impl_hex,
-                "data": format!("0x{}", hex::encode(&data)),
-            }, block_tag])).await?;
-            res = hex::decode(res2_hex.trim_start_matches("0x"))?;
-            if res.len() < 32 {
-                anyhow::bail!("short returndata for delayedMessageCount")
-            }
+            anyhow::bail!("short returndata for delayedMessageCount")
         }
         let count = Self::decode_u256_word(&res[0..32])?;
         Ok(count.try_into().map_err(|_| anyhow::anyhow!("count overflow"))?)
@@ -105,7 +93,6 @@ impl DelayedBridge for EthDelayedBridge {
         data.extend_from_slice(&Self::encode_selector(SIG_DELAYED_INBOX_ACCS));
         data.extend_from_slice(&Self::encode_u256(U256::from(seq_num)));
         let to_hex = format!("{:#x}", self.bridge_addr);
-        let from_hex = safe_from_for_proxy(&self.rpc, self.bridge_addr).await?;
         let block_id = if block_hash != B256::ZERO {
             json!({"blockHash": format!("{:#x}", block_hash)})
         } else {
@@ -113,21 +100,11 @@ impl DelayedBridge for EthDelayedBridge {
         };
         let res_hex: String = self.rpc.call("eth_call", json!([{
             "to": to_hex.clone(),
-            "from": from_hex,
             "data": format!("0x{}", hex::encode(&data)),
         }, block_id])).await?;
         let mut res = hex::decode(res_hex.trim_start_matches("0x"))?;
         if res.len() < 32 {
-            let impl_addr = crate::util::proxy_impl_address(&self.rpc, self.bridge_addr).await?;
-            let impl_hex = format!("{:#x}", impl_addr);
-            let res2_hex: String = self.rpc.call("eth_call", json!([{
-                "to": impl_hex,
-                "data": format!("0x{}", hex::encode(&data)),
-            }, block_id])).await?;
-            res = hex::decode(res2_hex.trim_start_matches("0x"))?;
-            if res.len() < 32 {
-                anyhow::bail!("short returndata for delayedInboxAccs")
-            }
+            anyhow::bail!("short returndata for delayedInboxAccs")
         }
         Ok(Self::decode_b256_word(&res[0..32])?)
     }
