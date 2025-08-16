@@ -465,8 +465,10 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                             }
                         }
 
-                        let mut sorted = good_batches;
+                        let mut sorted = good_batches.clone();
                         sorted.sort_by_key(|b| b.sequence_number);
+                        let min_seen_seq_for_window = sorted.iter().map(|b| b.sequence_number).min().unwrap_or(u64::MAX);
+
                         let mut filtered: Vec<inbox_bridge::types::SequencerInboxBatch> = Vec::new();
                         let mut expected = our_latest_batch;
 
@@ -480,10 +482,21 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                         }
 
                         if filtered.is_empty() && our_latest_batch > 0 {
-                            info!(
-                                "inbox_reader: no contiguous batches starting at expected={}, skipping window",
-                                our_latest_batch
-                            );
+                            let min_seen_seq = min_seen_seq_for_window;
+                            if min_seen_seq > our_latest_batch {
+                                info!(
+                                    "inbox_reader: no contiguous batches at expected={}, min_seen_seq={} > expected; backing up window",
+                                    our_latest_batch, min_seen_seq
+                                );
+                                let cfg2 = (self.config)();
+                                from = self.get_prev_block_for_reorg(from, blocks_to_fetch).unwrap_or(self.first_message_block);
+                                blocks_to_fetch = cfg2.min_blocks_to_read;
+                            } else {
+                                info!(
+                                    "inbox_reader: no contiguous batches starting at expected={}, skipping window",
+                                    our_latest_batch
+                                );
+                            }
                         } else if filtered.is_empty() && our_latest_batch == 0 {
                             info!("inbox_reader: no batches starting at 0 found in this window; will continue scanning");
                         }
