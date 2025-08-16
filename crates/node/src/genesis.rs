@@ -168,6 +168,7 @@ impl GenesisBootstrap {
         let fetcher = |_bn: u64| -> anyhow::Result<Vec<u8>> { Ok(Vec::new()) };
 
         let mut init_msg_opt: Option<nitro_primitives::l1::L1IncomingMessage> = None;
+        let mut init_block_opt: Option<u64> = None;
         let mut start = from_block;
         while start <= latest {
             let end = start.saturating_add(9_999).min(latest);
@@ -179,6 +180,7 @@ impl GenesisBootstrap {
                 tracing::info!(target: "genesis_bootstrap", "found {} delayed messages in window; kinds={:?}", msgs.len(), kinds);
                 if let Some(found) = msgs.into_iter().find(|m| m.message.header.kind == 11u8) {
                     tracing::info!(target: "genesis_bootstrap", "found init message (kind=11) in window {}-{}", start, end);
+                    init_block_opt = Some(end);
                     init_msg_opt = Some(found.message);
                     break;
                 }
@@ -190,6 +192,9 @@ impl GenesisBootstrap {
         }
 
         let Some(init_msg) = init_msg_opt else { return Ok(None); };
+        if let Some(bn) = init_block_opt {
+            tracing::info!(target: "genesis_bootstrap", "init message located around L1 block {}", bn);
+        }
         let parsed = nitro_primitives::l1::parse_init_message(&init_msg)?;
 
         let chain_id = parsed.chain_id_u64().unwrap_or(421_614u64);

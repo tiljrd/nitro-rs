@@ -170,9 +170,9 @@ impl<B1: DelayedBridge, B2: SequencerInbox, D: nitro_inbox::db::Database> InboxR
                     } else {
                         current_height = 0;
                     }
-                    if current_height < self.first_message_block {
-                        current_height = self.first_message_block;
-                    }
+                }
+                if current_height < self.first_message_block {
+                    current_height = self.first_message_block;
                 }
                 if from > current_height {
                     from = current_height;

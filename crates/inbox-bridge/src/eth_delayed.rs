@@ -1,10 +1,7 @@
+use crate::selectors::{SIG_DELAYED_COUNT, SIG_DELAYED_INBOX_ACCS, SIG_SEND_L2_FROM_ORIGIN, EVT_MESSAGE_DELIVERED, EVT_INBOX_MESSAGE_DELIVERED, EVT_INBOX_MESSAGE_FROM_ORIGIN};
 use crate::rpc::RpcClient;
 use crate::traits::DelayedBridge;
 use crate::types::DelayedInboxMessage;
-use crate::selectors::{
-    SIG_DELAYED_COUNT, SIG_DELAYED_INBOX_ACCS, SIG_SEND_L2_FROM_ORIGIN,
-    EVT_MESSAGE_DELIVERED, EVT_INBOX_MESSAGE_DELIVERED, EVT_INBOX_MESSAGE_FROM_ORIGIN,
-};
 use alloy_primitives::{keccak256, Address, B256, U256};
 use async_trait::async_trait;
 use serde::Deserialize;
