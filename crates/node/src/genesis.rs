@@ -294,5 +294,3 @@ impl GenesisBootstrap {
         Ok(spec)
     }
 }
-
-}
