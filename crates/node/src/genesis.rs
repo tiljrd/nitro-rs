@@ -282,10 +282,105 @@ impl GenesisBootstrap {
 
         let chain_id = chain_entry.chain_id.unwrap_or(421_614) as u64;
 
-        let chain_cfg_json_str = chain_entry
-            .chain_config
-            .as_ref()
-            .map(|v| v.to_string());
+        fn extract_chain_config_raw_for(chain_id: u64) -> Option<String> {
+            let text: &str = include_str!("./chaininfo/arbitrum_chain_info.json");
+            let bytes = text.as_bytes();
+            let key_cfg = br#""chain-config""#;
+            let mut pos = 0usize;
+
+            fn hex_char_val(c: u8) -> Option<u8> {
+                match c { b'0'..=b'9' => Some(c - b'0'), b'a'..=b'f' => Some(10 + (c - b'a')), b'A'..=b'F' => Some(10 + (c - b'A')), _ => None }
+            }
+            fn find_json_number(buf: &[u8], key: &[u8]) -> Option<u64> {
+                let mut i = 0usize;
+                while i + key.len() < buf.len() {
+                    if &buf[i..i + key.len()] == key {
+                        let mut j = i + key.len();
+                        while j < buf.len() && (buf[j] == b' ' || buf[j] == b'\t' || buf[j] == b'\r' || buf[j] == b'\n' || buf[j] == b':' ) { j += 1; }
+                        let mut val: u64 = 0;
+                        let mut any = false;
+                        while j < buf.len() {
+                            let c = buf[j];
+                            if c >= b'0' && c <= b'9' {
+                                any = true;
+                                val = val.saturating_mul(10).saturating_add((c - b'0') as u64);
+                                j += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        if any { return Some(val); }
+                        return None;
+                    }
+                    i += 1;
+                }
+                None
+            }
+
+            while let Some(cfg_pos_rel) = text[pos..].find(core::str::from_utf8(key_cfg).ok()?) {
+                let cfg_pos = pos + cfg_pos_rel;
+                let colon = text[cfg_pos..].find(':')? + cfg_pos;
+                let mut i = colon + 1;
+                while i < bytes.len() && bytes[i].is_ascii_whitespace() { i += 1; }
+                if i >= bytes.len() || bytes[i] != b'{' { pos = cfg_pos + key_cfg.len(); continue; }
+                let start_obj = i;
+                let mut depth: i32 = 0;
+                let mut j = i;
+                while j < bytes.len() {
+                    let c = bytes[j];
+                    if c == b'{' { depth += 1; }
+                    if c == b'}' {
+                        depth -= 1;
+                        if depth == 0 {
+                            let obj_bytes = &bytes[start_obj..=j];
+                            if let Some(val) = find_json_number(obj_bytes, br#""chainId""#) {
+                                if val == chain_id {
+                                    let obj_str = &text[start_obj..=j];
+                                    return Some(obj_str.to_string());
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    j += 1;
+                }
+                pos = j.saturating_add(1);
+            }
+            None
+        }
+        let chain_cfg_json_str = extract_chain_config_raw_for(chain_id);
+
+        let arbos_state_addr = alloy_primitives::Address::from_slice(&alloy_primitives::hex::decode("A4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").unwrap_or_default());
+        let root_key: Vec<u8> = Vec::new();
+        fn be_u256(val: alloy_primitives::U256) -> alloy_primitives::B256 { alloy_primitives::B256::from(val.to_be_bytes::<32>()) }
+        fn be_u64(v: u64) -> alloy_primitives::B256 { be_u256(alloy_primitives::U256::from(v)) }
+        fn keccak(data: Vec<u8>) -> alloy_primitives::B256 { alloy_primitives::keccak256(data) }
+        fn subspace(storage_key: &[u8], id: u8) -> Vec<u8> { keccak([storage_key, &[id]].concat().to_vec()) .as_slice().to_vec() }
+        fn map_slot(storage_key: &[u8], key: alloy_primitives::B256) -> alloy_primitives::B256 {
+            let mut key_bytes = [0u8; 32];
+            key_bytes.copy_from_slice(key.as_slice());
+            let boundary = 31usize;
+            let mut mapped = [0u8; 32];
+            let hashed = alloy_primitives::keccak256([storage_key, &key_bytes[..boundary]].concat());
+            mapped[..boundary].copy_from_slice(&hashed[..boundary]);
+            mapped[boundary] = key_bytes[boundary];
+            alloy_primitives::B256::from(mapped)
+        }
+        let l1_space = subspace(&root_key, 0u8);
+        let l1_price_slot = map_slot(&l1_space, be_u64(7));
+        let slot_hex = format!("0x{}", alloy_primitives::hex::encode(l1_price_slot.as_slice()));
+        let addr_hex = format!("{arbos_state_addr:#x}");
+        let body_ppu = serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "eth_getStorageAt",
+            "params": [addr_hex, slot_hex, "0x0"]
+        });
+        let resp_ppu = client.post(l2_rpc_url).json(&body_ppu).send().await?;
+        if !resp_ppu.status().is_success() {
+            return Err(anyhow!("failed to fetch initial L1 price-per-unit"));
+        }
+        let v_ppu: serde_json::Value = resp_ppu.json().await?;
+        let ppu_val = v_ppu.get("result").and_then(|x| x.as_str()).unwrap_or("0x0").to_string();
+
         let spec = reth_arbitrum_chainspec::sepolia_baked_genesis_from_header(
             chain_id,
             base_fee_hex,
@@ -294,6 +389,7 @@ impl GenesisBootstrap {
             gas_limit_hex,
             extra_data_hex,
             chain_cfg_json_str.as_deref(),
+            Some(ppu_val.as_str()),
         )?;
 
         Ok(spec)
