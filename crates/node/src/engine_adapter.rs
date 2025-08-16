@@ -21,6 +21,8 @@ use alloy_rpc_types_engine::ForkchoiceState;
 use reth_payload_primitives::PayloadKind;
 use reth_payload_primitives::EngineApiMessageVersion;
 use alloy_rpc_types_engine::PayloadStatusEnum;
+use reth_arbitrum_evm::header::extract_send_root_from_header_extra;
+use reth_arbitrum_node::follower::DynFollowerExecutor;
 
 
 type PayloadTy = ArbEngineTypes<ArbPayloadTypes>;
@@ -28,6 +30,7 @@ type PayloadTy = ArbEngineTypes<ArbPayloadTypes>;
 pub struct RethExecEngine {
     beacon_engine_handle: Option<BeaconConsensusEngineHandle<PayloadTy>>,
     payload_builder_handle: Option<PayloadBuilderHandle<PayloadTy>>,
+    follower_executor: Option<DynFollowerExecutor>,
     db: Arc<dyn Database>,
     genesis_hash: B256,
     last_timestamp: AtomicU64,
@@ -38,6 +41,7 @@ impl RethExecEngine {
         Arc::new(Self {
             beacon_engine_handle: None,
             payload_builder_handle: None,
+            follower_executor: None,
             db,
             genesis_hash,
             last_timestamp: AtomicU64::new(genesis_timestamp),
@@ -48,12 +52,14 @@ impl RethExecEngine {
         db: Arc<dyn Database>,
         beacon_engine_handle: BeaconConsensusEngineHandle<PayloadTy>,
         payload_builder_handle: Option<PayloadBuilderHandle<PayloadTy>>,
+        follower_executor: Option<DynFollowerExecutor>,
         genesis_hash: B256,
         genesis_timestamp: u64,
     ) -> Arc<Self> {
         Arc::new(Self {
             beacon_engine_handle: Some(beacon_engine_handle),
             payload_builder_handle,
+            follower_executor,
             db,
             genesis_hash,
             last_timestamp: AtomicU64::new(genesis_timestamp),
@@ -99,12 +105,6 @@ impl ExecEngine for RethExecEngine {
             .beacon_engine_handle
             .as_ref()
             .ok_or_else(|| anyhow!("missing beacon engine handle"))?;
-        let builder = match self.payload_builder_handle.as_ref() {
-            Some(h) => h,
-            None => {
-                return Err(anyhow!("payload builder disabled in follower mode; digest_message must import sequencer-provided payload"));
-            }
-        };
 
         let parent_hash = if msg_idx == 0 {
             self.genesis_hash
@@ -126,6 +126,7 @@ impl ExecEngine for RethExecEngine {
             ts = prev.saturating_add(1);
         }
         self.last_timestamp.store(ts, Ordering::Relaxed);
+
         let rpc_attrs = EthPayloadAttributes {
             timestamp: ts,
             prev_randao: B256::ZERO,
@@ -156,10 +157,22 @@ impl ExecEngine for RethExecEngine {
             .fork_choice_updated(pre_fcu, None, EngineApiMessageVersion::default())
             .await
             .map_err(|e| anyhow!("engine pre fork_choice_updated error: {e}"))?;
-        tracing::info!("engine_adapter: pre-forkchoiceUpdated payload_status={:?}", pre_resp.payload_status);
         if pre_resp.is_invalid() {
             return Err(anyhow!("engine pre fork_choice_updated invalid: {:?}", pre_resp.payload_status));
         }
+
+        if self.payload_builder_handle.is_none() {
+            let follower = self.follower_executor.as_ref().ok_or_else(|| anyhow!("missing follower executor"))?;
+            let l2msg_bytes = msg.message.l2msg.as_ref();
+            let (block_hash, send_root) = follower
+                .execute_message_to_block(parent_hash, rpc_attrs.clone(), l2msg_bytes)
+                .await
+                .map_err(|e| anyhow!("follower execute_message_to_block failed: {e}"))?;
+            let _ = self.last_timestamp.fetch_max(ts, Ordering::Relaxed);
+            return Ok(MessageResult { block_hash, send_root });
+        }
+
+        let builder = self.payload_builder_handle.as_ref().unwrap();
 
         let fcu_with_attrs = beacon
             .fork_choice_updated(
@@ -173,7 +186,6 @@ impl ExecEngine for RethExecEngine {
             )
             .await
             .map_err(|e| anyhow!("engine fork_choice_updated(with attrs) error: {e}"))?;
-        tracing::info!("engine_adapter: forkchoiceUpdated(with attrs) payload_status={:?}", fcu_with_attrs.payload_status);
         if fcu_with_attrs.is_invalid() {
             return Err(anyhow!("engine fork_choice_updated with attrs invalid: {:?}", fcu_with_attrs.payload_status));
         }
@@ -188,7 +200,6 @@ impl ExecEngine for RethExecEngine {
                         let msg = format!("{e}");
                         if msg.contains("missing parent header") && attempts < 60 {
                             attempts += 1;
-                            tracing::warn!("payload_builder: parent header not yet available, parent={:?}, retry {attempts}/60", parent_hash);
                             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                             continue;
                         }
@@ -197,7 +208,6 @@ impl ExecEngine for RethExecEngine {
                     Err(_) => {
                         if attempts < 10 {
                             attempts += 1;
-                            tracing::warn!("payload_builder: channel closed? retrying {attempts}/10");
                             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                             continue;
                         }
@@ -214,14 +224,7 @@ impl ExecEngine for RethExecEngine {
 
         let block_hash = built.block().hash();
         let header = built.block().header();
-        let send_root = {
-            let bytes = header.extra_data.as_ref();
-            if bytes.len() >= 32 {
-                B256::from_slice(&bytes[..32])
-            } else {
-                B256::ZERO
-            }
-        };
+        let send_root = extract_send_root_from_header_extra(header.extra_data.as_ref());
         let fcu_state = ForkchoiceState {
             head_block_hash: block_hash,
             safe_block_hash: parent_hash,
@@ -231,7 +234,6 @@ impl ExecEngine for RethExecEngine {
             .fork_choice_updated(fcu_state, None, EngineApiMessageVersion::default())
             .await
             .map_err(|e| anyhow!("engine fork_choice_updated error: {e}"))?;
-        tracing::info!("engine_adapter: forkchoiceUpdated payload_status={:?}", fcu_resp.payload_status);
         if !matches!(fcu_resp.payload_status.status, PayloadStatusEnum::Valid | PayloadStatusEnum::Syncing) {
             return Err(anyhow!("engine fork_choice_updated not valid/syncing: {:?}", fcu_resp.payload_status));
         }

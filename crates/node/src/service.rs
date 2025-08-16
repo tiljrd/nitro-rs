@@ -256,8 +256,16 @@ impl NitroNode {
         } else {
             None
         };
+        let follower_executor = if self.args.sequencer { None } else { reth_arbitrum_node::follower::get_follower_executor() };
 
-        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(db.clone(), beacon_handle, maybe_payload_handle, genesis_hash, genesis_timestamp);
+        let exec = crate::engine_adapter::RethExecEngine::new_with_handles(
+            db.clone(),
+            beacon_handle,
+            maybe_payload_handle,
+            follower_executor,
+            genesis_hash,
+            genesis_timestamp,
+        );
         let streamer_impl = Arc::new(nitro_streamer::streamer::TransactionStreamer::new(db.clone(), exec));
         let streamer_trait = streamer_impl.clone() as Arc<dyn nitro_inbox::streamer::Streamer>;
 
