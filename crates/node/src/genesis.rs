@@ -282,6 +282,10 @@ impl GenesisBootstrap {
 
         let chain_id = chain_entry.chain_id.unwrap_or(421_614) as u64;
 
+        let chain_cfg_json_str = chain_entry
+            .chain_config
+            .as_ref()
+            .map(|v| v.to_string());
         let spec = reth_arbitrum_chainspec::sepolia_baked_genesis_from_header(
             chain_id,
             base_fee_hex,
@@ -289,6 +293,7 @@ impl GenesisBootstrap {
             state_root_hex,
             gas_limit_hex,
             extra_data_hex,
+            chain_cfg_json_str.as_deref(),
         )?;
 
         Ok(spec)

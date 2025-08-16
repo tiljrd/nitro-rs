@@ -10,6 +10,8 @@ pub struct ChainInfo {
     pub chain_id: Option<u64>,
     #[serde(rename = "chain-name")]
     pub chain_name: Option<String>,
+    #[serde(rename = "chain-config")]
+    pub chain_config: Option<serde_json::Value>,
     #[serde(rename = "rollup")]
     pub rollup: Option<RollupAddresses>,
 }
